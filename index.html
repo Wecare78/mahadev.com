@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Mahadev Pannel — Mobile Banking &amp; Gaming Panel</title>
+    <meta name="description" content="Mahadev Pannel - Mobile banking panel for instant settlement, UTR verification, and live commission payouts." />
+    <meta property="og:title" content="Mahadev Pannel" />
+    <meta property="og:description" content="Mahadev Pannel - Mobile banking panel for instant settlement, UTR verification, and live commission payouts." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="stylesheet" href="./style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="mp-body mp-auth-body">
+    <!-- IN-APP PAYMENT NOTIFICATION CONTAINER -->
+    <div id="paymentNotificationContainer" class="payment-notification-container" aria-live="assertive"></div>
+
+    <!-- COMPACT STICKY MOBILE APP BAR -->
+    <header class="mp-topbar">
+        <div class="mp-topbar-inner">
+            <div class="mp-brand">
+                <div class="mp-logo-frame" aria-hidden="true">
+                    <img src="./src/assets/images/mahadev_pannel_logo_1794679866477.jpg" alt="Mahadev Pannel" class="mp-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+                    <span class="mp-logo-fallback" style="display:none;">
+                        <svg width="24" height="24" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M18 4V31M18 4L14 10M18 4L22 10M10 9C10 15 13 18 18 18C23 18 26 15 26 9M10 9L8 12M26 9L28 12M13 24H23" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                </div>
+                <div class="mp-brand-copy">
+                    <span class="mp-brand-name">MAHADEV PANNEL</span>
+                    <span class="mp-brand-sub">ROYAL BANKING PANEL</span>
+                </div>
+            </div>
+
+            <a href="https://t.me/+gPDN87ly87liYTc1" class="mp-support-btn" target="_blank" rel="noopener noreferrer" title="Telegram Support">
+                <svg width="16" height="16" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M16 0C7.16 0 0 7.16 0 16s7.16 16 16 16 16-7.16 16-16-7.16-16-16-16zm7.69 10.94l-1.18 5.57c-.09.44-.32.57-.65.57-.36 0-1.02-.18-1.59-.35 1.21.79 2.13 1.28 3.01 1.73.32.17.51.43.44.71l-.83 5.44c-.09.49-.48.62-.98.41-2.31-1.29-3.71-2.07-5.02-3.22-.94.85-2.09 1.9-3.21 2.96-.38.35-.7.48-1.05.15l-.56-3.75c-.06-.4.08-.63.49-.78 2.36-.77 4.81-1.57 6.94-2.69-1.72-1.57-3.48-3.16-4.63-4.23-.4-.37-.26-.93.24-1.15l3.65-.82c.35-.08.65.07.82.38l2.15 4.39c.12.24.31.35.54.29.57-.16 1.21-.37 1.82-.59.27-.1.48.04.53.31z" fill="currentColor"/>
+                </svg>
+                <span>Support</span>
+            </a>
+        </div>
+    </header>
+
+    <main class="mp-auth-shell">
+        <!-- ROYAL BANKING APP HERO CARD -->
+        <section class="mp-auth-hero" aria-label="Mahadev Pannel Overview">
+            <img src="./src/assets/images/mahadev_vault_bg_1794679870399.jpg" alt="" class="mp-auth-hero-bg" onerror="this.style.display='none';">
+            <div class="mp-auth-hero-scrim"></div>
+            <div class="mp-auth-hero-content">
+                <div class="mp-hero-emblem-row">
+                    <div class="mp-hero-crest">
+                        <img src="./src/assets/images/mahadev_pannel_logo_1794679866477.jpg" alt="Mahadev Pannel Crest" onerror="this.style.display='none';">
+                    </div>
+                    <div class="mp-hero-id-block">
+                        <span class="mp-hero-kicker">VERIFIED SETTLEMENT APP</span>
+                        <h1 class="mp-hero-title">MAHADEV PANNEL</h1>
+                    </div>
+                </div>
+                <div class="mp-hero-metrics">
+                    <div class="mp-hero-metric">
+                        <span class="mp-hm-val">3.5%</span>
+                        <span class="mp-hm-lbl">Commission</span>
+                    </div>
+                    <div class="mp-hero-metric-sep"></div>
+                    <div class="mp-hero-metric">
+                        <span class="mp-hm-val">IMPS</span>
+                        <span class="mp-hm-lbl">Instant Pay</span>
+                    </div>
+                    <div class="mp-hero-metric-sep"></div>
+                    <div class="mp-hero-metric">
+                        <span class="mp-hm-val">₹799</span>
+                        <span class="mp-hm-lbl">Live Bonus</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- AUTHENTICATION APP CARD -->
+        <section class="mp-auth-panel">
+            <!-- Segmented Tab Navigation -->
+            <div class="tab-container mp-segmented-tabs" id="tabContainer">
+                <button type="button" class="tab-button active" data-tab="register">Open Account</button>
+                <button type="button" class="tab-button" data-tab="login">Sign In</button>
+            </div>
+
+            <!-- Registration Section -->
+            <div id="registerTab" class="tab-content active">
+                <div class="form-card mp-bank-card">
+                    <div class="mp-card-head">
+                        <h3>New Member Account</h3>
+                        <span class="mp-secure-tag">OTP Lock</span>
+                    </div>
+                    <form id="registerForm">
+                        <div class="form-group">
+                            <label for="regMobile">Mobile Number</label>
+                            <div class="mobile-input-group">
+                                <span class="country-badge">+91</span>
+                                <input type="tel" id="regMobile" name="mobile" placeholder="10-digit mobile" maxlength="16" autocomplete="tel-national" required>
+                                <button type="button" class="btn btn-otp-action" id="sendOtpBtn">Get OTP</button>
+                            </div>
+                            <small id="mobileError" class="error-message"></small>
+                            <div id="mobileVerifiedNotice" class="verified-pill" style="display:none;">
+                                <span class="check-icon">✓</span>
+                                <span>Verified: <strong id="verifiedMobileDisplay">+91 ----------</strong></span>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="regUsername">User ID</label>
+                            <input type="text" id="regUsername" name="username" placeholder="Create username (min 3 chars)" required>
+                            <small id="usernameError" class="error-message"></small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="regPassword">MPIN / Password</label>
+                            <input type="password" id="regPassword" name="password" placeholder="Create password (min 4 chars)" required>
+                            <small id="passwordError" class="error-message"></small>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary mp-btn-full" id="registerSubmitBtn">Create Account</button>
+                    </form>
+                    <div id="registerMessage" class="message"></div>
+                </div>
+            </div>
+
+            <!-- Login Section -->
+            <div id="loginTab" class="tab-content">
+                <div class="form-card mp-bank-card">
+                    <div class="mp-card-head">
+                        <h3>Member Sign In</h3>
+                        <span class="mp-secure-tag">256-Bit</span>
+                    </div>
+                    <div id="postRegisterNotice" class="post-register-notice" style="display:none;">
+                        <span class="post-reg-icon">✓</span>
+                        <div>
+                            <strong>Account Ready</strong>
+                            <p id="postRegisterNoticeText">Sign in with your mobile or user ID.</p>
+                        </div>
+                    </div>
+                    <form id="loginForm">
+                        <div class="form-group">
+                            <label for="loginUsername">Mobile or User ID</label>
+                            <input type="text" id="loginUsername" name="username" placeholder="Registered mobile or username" required>
+                            <small id="loginUsernameError" class="error-message"></small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="loginPassword">Password</label>
+                            <input type="password" id="loginPassword" name="password" placeholder="Enter password" required>
+                            <small id="loginPasswordError" class="error-message"></small>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary mp-btn-full" id="loginSubmitBtn">Unlock Dashboard</button>
+                    </form>
+                    <div id="loginMessage" class="message"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- MOBILE OTP VERIFICATION MODAL -->
+    <div id="otpModalOverlay" class="otp-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="otpModalTitle">
+        <div class="otp-modal-card">
+            <div class="otp-real-sms-badge" id="otpProviderBadge">
+                <span>SMS OTP VERIFICATION</span>
+            </div>
+
+            <div class="otp-modal-header">
+                <div class="otp-shield-icon" aria-hidden="true">
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        <path d="M9 12l2 2 4-4" stroke="#10B981" stroke-width="2"/>
+                    </svg>
+                </div>
+                <h3 id="otpModalTitle">Verify Mobile</h3>
+                <p class="otp-modal-subtitle">6-digit code to <strong id="otpTargetMobile">+91 ----------</strong></p>
+            </div>
+
+            <div id="otpDeliveryPendingState" class="otp-delivery-pending" style="display:none;">
+                <div class="otp-pending-top">
+                    <span class="otp-pending-spinner" aria-hidden="true"></span>
+                    <div class="otp-pending-text">
+                        <strong>Dispatching OTP...</strong>
+                        <span id="otpDeliveryCountdownText">Delivering code in 12s</span>
+                    </div>
+                </div>
+                <div class="otp-progress-track">
+                    <div id="otpDeliveryProgressFill" class="otp-progress-fill" style="width:0%;"></div>
+                </div>
+            </div>
+
+            <div id="instantSmsOtpBar" class="instant-otp-bar" style="display:none;">
+                <div class="instant-otp-info">
+                    <span class="instant-otp-label">SMS Code</span>
+                    <strong id="instantOtpCode" class="instant-otp-code">------</strong>
+                </div>
+                <button type="button" class="btn-use-otp" id="useFreeOtpBtn">Auto-Fill</button>
+            </div>
+
+            <div class="otp-inputs-wrapper">
+                <label for="otpInputField" class="otp-input-label">Enter 6-Digit OTP</label>
+                <input type="text" id="otpInputField" class="otp-single-input" placeholder="• • • • • •" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
+            </div>
+
+            <div class="otp-timer-row">
+                <span id="otpCountdownText">Resend in <strong id="otpTimerSeconds">45s</strong></span>
+                <button type="button" class="btn-resend-link" id="resendOtpBtn" style="display:none;">Resend OTP</button>
+            </div>
+
+            <div id="otpModalMessage" class="message" style="display:none;"></div>
+
+            <div class="otp-modal-actions">
+                <button type="button" class="btn btn-secondary" id="cancelOtpModalBtn">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmVerifyOtpBtn">Verify</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./src/firebase-client.ts" onerror="window.__firebaseTsLoadFailed=true"></script>
+    <script type="module" src="./script.js"></script>
+</body>
+</html>

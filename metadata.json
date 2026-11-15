@@ -1,0 +1,6 @@
+{
+  "name": "Mahadev Pannel",
+  "description": "Mahadev Pannel - Mobile banking panel for instant settlement, UTR verification, and live commission payouts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

