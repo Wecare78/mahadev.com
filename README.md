@@ -1,38 +1,27 @@
-# Account Funds
+# Mahadev Pannel
 
-Multi-page financial activation, live credit dashboard, UTR verification, and admin control portal powered by Vite, Firebase Firestore, and an optional Express server.
+Multi-page banking & gaming panel with OTP verification, instant UTR settlement, live commission payouts, and real-time Firebase Firestore admin control.
 
-## Works Directly on GitHub Pages & Any Device
+## GitHub Pages Branch Deployment (No Build or Server Required)
 
-This repository includes automatic static build & deployment compatibility:
-- **GitHub Pages Ready**: Configured with `base: './'` in `vite.config.ts`, relative asset references across `index.html`, `dashboard.html`, and `admin.html`, and an automated `.github/workflows/deploy.yml` workflow that builds and publishes `dist/` on push to `main` or `master`.
-- **Static Hosting Fallback**: OTP generation/verification and Admin authentication automatically fall back cleanly when deployed statically without a Node server, while continuing to sync live user, UTR, receipt, and audit data with Firebase Firestore.
-- **Responsive Across Devices**: Mobile (`320px+`), tablet, and desktop layouts, plus print/PDF-ready verified payment receipts.
+This repository runs directly from the root `/` on GitHub Pages without GitHub Actions or a backend server:
+- **Source**: Deploy from a branch
+- **Branch**: `main`
+- **Folder**: `/ (root)`
+- **Static Compatibility**: Uses root `index.html`, relative `./` asset and CSS/JS paths (`./style.css`, `./script.js`, `./src/assets/images/...`), `.nojekyll`, and automatic Firebase CDN ES-module hydration directly in the browser.
 
-### Enable GitHub Pages on Your Repository
-1. Open **Settings → Pages** in your GitHub repository.
-2. Under **Build and deployment → Source**, choose **GitHub Actions**.
-3. Push to `main` (or trigger the **Deploy to GitHub Pages** workflow manually). Your live site URL will work out of the box.
+### Enable GitHub Pages
+1. Open **Settings → Pages** in `Wecare78/mahadev.com`.
+2. Under **Build and deployment → Source**, choose **Deploy from a branch**.
+3. Select **Branch: `main`** and **Folder: `/ (root)`**, then click **Save**.
 
-## Local Development
+## Pages & Entry Points
+- **Member Portal (`index.html` & `dashboard.html`)**: Mobile OTP verification, registration/login, IFSC bank auto-lookup, ATM card mandate, ₹399 activation UTR submission, live credit engine, and verified payment receipts.
+- **Backend Admin Control (`mahadev-admin.html`, `mahadev-control.html`, `admin.html`)**: Real-time Firestore dashboard, member profile inspector, activity & SMS logs, and live UTR approval/rejection controls.
 
-### Prerequisites
-- Node.js 20+
-
-### Full-Stack Dev Server (Express + Vite)
+## Local Development (Optional Full-Stack Server)
 ```bash
 npm install
 npm run dev
 ```
 Runs on `http://localhost:3000`.
-
-### Production Static Build
-```bash
-npm run build
-npm run preview
-```
-Outputs the multi-page bundle into `dist/` (`index.html`, `dashboard.html`, `admin.html`).
-
-## Key Workflows
-- **Customer Portal (`index.html` & `dashboard.html`)**: Mobile OTP verification, registration/login, bank & IFSC auto-verification, autodebit configuration, ₹399 activation UTR submission with live 3-step verification tracker, live credit engine, and ₹199 limit upgrade UTR submission with automatic Official Payment & Withdrawal Receipt generation upon Admin approval.
-- **Admin Portal (`admin.html`)**: Real-time Firestore dashboard, user inspector, live activity & SMS logs, and filtered Customer UTR Verification Queue (`All`, `Pending`, `Verified`, `Rejected`) supporting instant approval/rejection and automatic receipt issuance.

