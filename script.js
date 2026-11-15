@@ -1038,14 +1038,58 @@ function formatNotificationTime(timestamp) {
 
 
 // ============================================
-// AUTHENTIC TRUECALLER NOTIFICATION SOUND ENGINE
-// Crisp B-major marimba/crystal tri-tone chime (B5 -> D#6 -> F#6)
-// Pre-synthesized 44.1kHz PCM WAV Audio + Web Audio API fallback
+// ORIGINAL TRUECALLER NOTIFICATION AUDIO SYSTEM
+// Uses authentic tc_message_tone via #truecallerNotificationAudio
+// Triggers specifically when #paymentNotificationContainer displays a new message
 // ============================================
+const TRUECALLER_AUDIO_PRIMARY_SRC = 'src/assets/audio/truecaller_notification.mp3';
+const TRUECALLER_AUDIO_CANDIDATES = [
+    './src/assets/audio/truecaller_notification.mp3',
+    './assets/truecaller_notification.mp3',
+    './public/assets/truecaller_notification.mp3',
+    './src/assets/audio/truecaller_notification.ogg',
+    './assets/truecaller_notification.ogg',
+    './public/assets/truecaller_notification.ogg'
+];
+
+let _tcAudioElement = null;
 let _sharedAudioCtx = null;
-let _tcChimeBlobUrl = null;
-let _tcNotificationAudio = null;
+let _tcDecodedBuffer = null;
+let _tcResolvedAudioUrl = null;
+let _tcResolvePromise = null;
 let _audioUnlocked = false;
+let _tcElementPrimed = false;
+let _paymentNotifObserver = null;
+const _playedNotificationIds = new Set();
+
+function initializeTruecallerAudio() {
+    if (typeof document === 'undefined') return null;
+    if (!_tcAudioElement) {
+        _tcAudioElement = document.getElementById('truecallerNotificationAudio');
+    }
+    if (!_tcAudioElement) {
+        _tcAudioElement = document.createElement('audio');
+        _tcAudioElement.id = 'truecallerNotificationAudio';
+        _tcAudioElement.src = TRUECALLER_AUDIO_PRIMARY_SRC;
+        _tcAudioElement.preload = 'auto';
+        _tcAudioElement.hidden = true;
+        _tcAudioElement.setAttribute('playsinline', '');
+        if (document.body) {
+            document.body.appendChild(_tcAudioElement);
+        }
+    } else if (!_tcAudioElement.getAttribute('src')) {
+        _tcAudioElement.src = TRUECALLER_AUDIO_PRIMARY_SRC;
+    }
+    _tcAudioElement.preload = 'auto';
+    _tcAudioElement.volume = 0.96;
+    if (_tcResolvedAudioUrl) {
+        const currentAttr = _tcAudioElement.getAttribute('src') || '';
+        if (currentAttr !== _tcResolvedAudioUrl) {
+            _tcAudioElement.src = _tcResolvedAudioUrl;
+        }
+    }
+    return _tcAudioElement;
+}
 
 function getSharedAudioContext() {
     if (typeof window === 'undefined') return null;
@@ -1058,183 +1102,232 @@ function getSharedAudioContext() {
     return _sharedAudioCtx;
 }
 
-function buildTruecallerChimeWavUrl() {
-    if (_tcChimeBlobUrl) return _tcChimeBlobUrl;
-    if (typeof Blob === 'undefined' || typeof URL === 'undefined') return null;
-
-    const sampleRate = 44100;
-    const duration = 0.62;
-    const totalSamples = Math.floor(sampleRate * duration);
-    const buffer = new ArrayBuffer(44 + totalSamples * 2);
-    const view = new DataView(buffer);
-
-    function writeStr(offset, str) {
-        for (let i = 0; i < str.length; i++) {
-            view.setUint8(offset + i, str.charCodeAt(i));
-        }
-    }
-
-    writeStr(0, 'RIFF');
-    view.setUint32(4, 36 + totalSamples * 2, true);
-    writeStr(8, 'WAVE');
-    writeStr(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeStr(36, 'data');
-    view.setUint32(40, totalSamples * 2, true);
-
-    // Authentic Truecaller crisp double-pop crystal bell notification chime (C6 -> G6)
-    const notes = [
-        { freq: 1046.50, start: 0.000, decay: 18.0, amp: 0.44 },
-        { freq: 1567.98, start: 0.112, decay: 8.2, amp: 0.56 }
-    ];
-
-    for (let i = 0; i < totalSamples; i++) {
-        const t = i / sampleRate;
-        let sample = 0;
-
-        for (let n = 0; n < notes.length; n++) {
-            const note = notes[n];
-            const dt = t - note.start;
-            if (dt >= 0) {
-                const attack = dt < 0.0025 ? 0.5 * (1 - Math.cos(Math.PI * (dt / 0.0025))) : 1.0;
-                const env = attack * Math.exp(-note.decay * dt);
-                const fundamental = Math.sin(2 * Math.PI * note.freq * dt);
-                const partial2 = 0.24 * Math.sin(2 * Math.PI * note.freq * 2.0 * dt) * Math.exp(-22 * dt);
-                const partial3 = 0.08 * Math.sin(2 * Math.PI * note.freq * 3.01 * dt) * Math.exp(-34 * dt);
-                const malletPop = 0.14 * Math.sin(2 * Math.PI * note.freq * 0.5 * dt) * Math.exp(-42 * dt);
-                sample += note.amp * env * (fundamental + partial2 + partial3 + malletPop);
-            }
-        }
-
-        if (t > 0.20) {
-            const tailDt = t - 0.205;
-            sample += 0.06 * Math.exp(-8.5 * tailDt) * Math.sin(2 * Math.PI * 1567.98 * tailDt);
-        }
-
-        sample = Math.max(-0.92, Math.min(0.92, sample));
-        view.setInt16(44 + i * 2, Math.round(sample * 32767), true);
-    }
-
-    const blob = new Blob([buffer], { type: 'audio/wav' });
-    _tcChimeBlobUrl = URL.createObjectURL(blob);
-    return _tcChimeBlobUrl;
+function isAudioMagicBytes(bytes) {
+    if (!bytes || bytes.length < 4) return false;
+    // OGG ("OggS")
+    if (bytes[0] === 0x4F && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) return true;
+    // MP3 ("ID3" or MPEG frame sync 0xFF 0xE0+)
+    if (bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) return true;
+    if (bytes[0] === 0xFF && (bytes[1] & 0xE0) === 0xE0) return true;
+    // WAV ("RIFF")
+    if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) return true;
+    return false;
 }
 
-function initTruecallerAudioElement() {
-    if (_tcNotificationAudio || typeof Audio === 'undefined') return _tcNotificationAudio;
-    const wavUrl = buildTruecallerChimeWavUrl();
-    if (!wavUrl) return null;
-    const audio = new Audio(wavUrl);
-    audio.preload = 'auto';
-    audio.volume = 0.95;
-    _tcNotificationAudio = audio;
-    return _tcNotificationAudio;
+async function resolveTruecallerAudioAsset() {
+    if (_tcDecodedBuffer || _tcResolvedAudioUrl) {
+        if (!_tcDecodedBuffer && _tcResolvedAudioUrl) {
+            const ctx = getSharedAudioContext();
+            if (ctx && typeof ctx.decodeAudioData === 'function') {
+                try {
+                    const r = await fetch(_tcResolvedAudioUrl, { cache: 'force-cache' });
+                    if (r.ok) {
+                        const ab = await r.arrayBuffer();
+                        _tcDecodedBuffer = await ctx.decodeAudioData(ab.slice(0));
+                    }
+                } catch {}
+            }
+        }
+        return { url: _tcResolvedAudioUrl, buffer: _tcDecodedBuffer };
+    }
+    if (_tcResolvePromise) return _tcResolvePromise;
+
+    _tcResolvePromise = (async () => {
+        if (typeof fetch === 'undefined') return { url: null, buffer: null };
+        const el = initializeTruecallerAudio();
+        const elSrc = el ? (el.currentSrc || el.getAttribute('src')) : null;
+        const candidates = elSrc
+            ? [elSrc, ...TRUECALLER_AUDIO_CANDIDATES.filter((c) => c !== elSrc)]
+            : TRUECALLER_AUDIO_CANDIDATES;
+
+        for (const candidateUrl of candidates) {
+            try {
+                const resp = await fetch(candidateUrl, { cache: 'force-cache' });
+                if (!resp.ok) continue;
+                const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+                if (contentType.includes('text/html') || contentType.includes('application/json')) {
+                    continue;
+                }
+                const arrBuf = await resp.arrayBuffer();
+                if (!arrBuf || arrBuf.byteLength < 256) continue;
+                const head = new Uint8Array(arrBuf.slice(0, 8));
+                if (!isAudioMagicBytes(head)) continue;
+
+                _tcResolvedAudioUrl = candidateUrl;
+                if (el && (el.getAttribute('src') || '') !== candidateUrl) {
+                    el.src = candidateUrl;
+                    try { el.load(); } catch {}
+                }
+                const ctx = getSharedAudioContext();
+                if (ctx && typeof ctx.decodeAudioData === 'function') {
+                    try {
+                        _tcDecodedBuffer = await ctx.decodeAudioData(arrBuf.slice(0));
+                    } catch {}
+                }
+                return { url: _tcResolvedAudioUrl, buffer: _tcDecodedBuffer };
+            } catch {}
+        }
+        _tcResolvePromise = null;
+        return { url: null, buffer: null };
+    })();
+
+    return _tcResolvePromise;
 }
 
 function unlockNotificationAudio() {
-    if (_audioUnlocked) return;
+    try {
+        const el = initializeTruecallerAudio();
+        if (el && !_tcElementPrimed && el.paused) {
+            _tcElementPrimed = true;
+            const prevMuted = el.muted;
+            el.muted = true;
+            const primePromise = el.play();
+            if (primePromise && typeof primePromise.then === 'function') {
+                primePromise.then(() => {
+                    try {
+                        el.pause();
+                        el.currentTime = 0;
+                        el.muted = prevMuted;
+                    } catch {}
+                }).catch(() => {
+                    el.muted = prevMuted;
+                    _tcElementPrimed = false;
+                });
+            } else {
+                el.muted = prevMuted;
+            }
+        }
+
+        if (!_audioUnlocked) {
+            const ctx = getSharedAudioContext();
+            if (ctx) {
+                if (ctx.state === 'suspended') {
+                    ctx.resume().then(() => {
+                        if (ctx.state === 'running') _audioUnlocked = true;
+                    }).catch(() => {});
+                } else if (ctx.state === 'running') {
+                    _audioUnlocked = true;
+                }
+                try {
+                    const silentBuf = ctx.createBuffer(1, 1, 22050);
+                    const silentSrc = ctx.createBufferSource();
+                    silentSrc.buffer = silentBuf;
+                    silentSrc.connect(ctx.destination);
+                    silentSrc.start(0);
+                } catch {}
+            }
+        }
+        void resolveTruecallerAudioAsset();
+    } catch {}
+}
+
+async function playDecodedTruecallerBuffer(buffer) {
     try {
         const ctx = getSharedAudioContext();
-        if (ctx && ctx.state === 'suspended') {
-            ctx.resume().catch(() => {});
+        if (!ctx || !buffer) return false;
+        if (ctx.state === 'suspended') {
+            await ctx.resume().catch(() => {});
         }
-        const audio = initTruecallerAudioElement();
-        if (audio) {
-            const prevVol = audio.volume;
-            audio.volume = 0;
-            const p = audio.play();
-            if (p && typeof p.then === 'function') {
-                p.then(() => {
-                    audio.pause();
-                    audio.currentTime = 0;
-                    audio.volume = prevVol;
-                    _audioUnlocked = true;
-                }).catch(() => {
-                    audio.volume = prevVol;
-                });
-            }
-        } else if (ctx && ctx.state === 'running') {
-            _audioUnlocked = true;
+        if (ctx.state !== 'running') return false;
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        const gainNode = ctx.createGain();
+        gainNode.gain.value = 0.96;
+        source.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        source.start(0);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+async function playNotificationSound(notificationId) {
+    const dedupeKey = notificationId ? String(notificationId) : null;
+    if (dedupeKey) {
+        if (_playedNotificationIds.has(dedupeKey)) return;
+        _playedNotificationIds.add(dedupeKey);
+        if (_playedNotificationIds.size > 500) {
+            const firstKey = _playedNotificationIds.values().next().value;
+            if (firstKey) _playedNotificationIds.delete(firstKey);
         }
-    } catch (e) {}
+    }
+
+    try {
+        const el = initializeTruecallerAudio();
+        const { url, buffer } = await resolveTruecallerAudioAsset();
+
+        if (el) {
+            try {
+                if (url && (el.getAttribute('src') || '') !== url) {
+                    el.src = url;
+                    el.load();
+                }
+                el.muted = false;
+                el.volume = 0.96;
+                el.currentTime = 0;
+                await el.play();
+                return;
+            } catch {}
+        }
+
+        if (buffer && await playDecodedTruecallerBuffer(buffer)) {
+            return;
+        }
+        if (url && typeof Audio !== 'undefined') {
+            const audioEl = new Audio(url);
+            audioEl.volume = 0.96;
+            await audioEl.play().catch(() => {});
+        }
+    } catch {}
+}
+
+function bindPaymentNotificationAudioObserver(targetContainer) {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+    const container = targetContainer || document.getElementById('paymentNotificationContainer');
+    if (!container || container.dataset.tcAudioObserved === '1') return;
+    container.dataset.tcAudioObserved = '1';
+
+    const checkVisiblePaymentMessage = () => {
+        const visibleCard = container.querySelector('.tc-notification-card.tc-notif-visible');
+        if (!visibleCard) return;
+        const notifKey = visibleCard.getAttribute('data-notif-id') || visibleCard.textContent.trim().slice(0, 80);
+        if (notifKey) {
+            void playNotificationSound(notifKey);
+        }
+    };
+
+    if (_paymentNotifObserver) {
+        _paymentNotifObserver.disconnect();
+    }
+    _paymentNotifObserver = new MutationObserver(() => {
+        checkVisiblePaymentMessage();
+    });
+    _paymentNotifObserver.observe(container, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'data-notif-id']
+    });
+}
+
+if (typeof window !== 'undefined') {
+    const bootAudioSystem = () => {
+        initializeTruecallerAudio();
+        bindPaymentNotificationAudioObserver();
+        void resolveTruecallerAudioAsset();
+    };
+    if (typeof document !== 'undefined' && document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootAudioSystem, { once: true });
+    } else {
+        bootAudioSystem();
+    }
 }
 
 if (typeof document !== 'undefined') {
     ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
         document.addEventListener(evtName, unlockNotificationAudio, { passive: true });
     });
-}
-
-function _playTruecallerWebAudioChime() {
-    try {
-        const ctx = getSharedAudioContext();
-        if (!ctx) return;
-        if (ctx.state === 'suspended') {
-            ctx.resume().catch(() => {});
-        }
-        const now = ctx.currentTime;
-        const notes = [
-            { freq: 1046.50, start: 0.0, stop: 0.24, peak: 0.42 },
-            { freq: 1567.98, start: 0.112, stop: 0.58, peak: 0.52 }
-        ];
-
-        notes.forEach((n) => {
-            const osc = ctx.createOscillator();
-            const overtone = ctx.createOscillator();
-            const gain = ctx.createGain();
-            const overGain = ctx.createGain();
-
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(n.freq, now + n.start);
-
-            overtone.type = 'triangle';
-            overtone.frequency.setValueAtTime(n.freq * 2, now + n.start);
-
-            gain.gain.setValueAtTime(0.0001, now + n.start);
-            gain.gain.linearRampToValueAtTime(n.peak, now + n.start + 0.004);
-            gain.gain.exponentialRampToValueAtTime(0.0001, now + n.stop);
-
-            overGain.gain.setValueAtTime(0.0001, now + n.start);
-            overGain.gain.linearRampToValueAtTime(0.11, now + n.start + 0.003);
-            overGain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + 0.12);
-
-            osc.connect(gain);
-            overtone.connect(overGain);
-            gain.connect(ctx.destination);
-            overGain.connect(ctx.destination);
-
-            osc.start(now + n.start);
-            osc.stop(now + n.stop);
-            overtone.start(now + n.start);
-            overtone.stop(now + n.start + 0.13);
-        });
-    } catch (e) {}
-}
-
-function playNotificationSound() {
-    try {
-        const wavUrl = buildTruecallerChimeWavUrl();
-        if (wavUrl && typeof Audio !== 'undefined') {
-            const freshAudio = new Audio(wavUrl);
-            freshAudio.volume = 0.96;
-            const playPromise = freshAudio.play();
-            if (playPromise && typeof playPromise.catch === 'function') {
-                playPromise.catch(() => {
-                    _playTruecallerWebAudioChime();
-                });
-            }
-            return;
-        }
-        _playTruecallerWebAudioChime();
-    } catch (e) {
-        _playTruecallerWebAudioChime();
-    }
 }
 
 // Helper: Generate a unique, recognizable, clean bank SVG crest for ANY custom entered bank
@@ -1890,6 +1983,7 @@ function showPaymentNotification(transaction) {
         container.setAttribute('aria-live', 'assertive');
         document.body.appendChild(container);
     }
+    bindPaymentNotificationAudioObserver(container);
 
     // Clear any previous hiding timers
     if (currentNotificationTimeout) {
@@ -1909,6 +2003,7 @@ function showPaymentNotification(transaction) {
         notifCard.setAttribute('role', 'alert');
         container.appendChild(notifCard);
     }
+    notifCard.setAttribute('data-notif-id', txnId);
 
     // 100% Authentic Android Truecaller Smart SMS Banking Notification (No Available Balance shown)
     notifCard.innerHTML = `
@@ -2028,8 +2123,8 @@ function showPaymentNotification(transaction) {
     notifCard.classList.add('tc-pulse');
     setTimeout(() => notifCard.classList.remove('tc-pulse'), 320);
 
-    // Play authentic Truecaller notification chime & haptic vibration
-    playNotificationSound();
+    // Play original Truecaller incoming notification sound once when overlay is displayed
+    void playNotificationSound(txnId);
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
         try {
             navigator.vibrate([80, 50, 110]);
@@ -2162,7 +2257,8 @@ const workflowSectionIds = [
     'withdrawCommissionSection',
     'upgradePaymentSection',
     'paymentReceiptSection',
-    'transactionHistorySection'
+    'transactionHistorySection',
+    'supportSection'
 ];
 const workflowHistory = [];
 
@@ -2293,6 +2389,26 @@ function goBackOneStep() {
 
 if (document.getElementById('registerForm')) {
     StorageManager.init();
+
+    const authSupportBtn = document.getElementById('authSupportBtn');
+    const authSupportBackBtn = document.getElementById('authSupportBackBtn');
+    const authMainShell = document.getElementById('authMainShell');
+    const authSupportSection = document.getElementById('authSupportSection');
+    if (authSupportBtn && authMainShell && authSupportSection) {
+        authSupportBtn.addEventListener('click', () => {
+            const isShowingSupport = !authSupportSection.classList.contains('hidden');
+            authSupportSection.classList.toggle('hidden', isShowingSupport);
+            authMainShell.classList.toggle('hidden', !isShowingSupport);
+            window.scrollTo({ top: 0, behavior: 'auto' });
+        });
+    }
+    if (authSupportBackBtn && authMainShell && authSupportSection) {
+        authSupportBackBtn.addEventListener('click', () => {
+            authSupportSection.classList.add('hidden');
+            authMainShell.classList.remove('hidden');
+            window.scrollTo({ top: 0, behavior: 'auto' });
+        });
+    }
 
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
@@ -2579,7 +2695,6 @@ if (document.getElementById('registerForm')) {
             }
 
             try {
-                playNotificationSound();
                 if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
             } catch (e) {}
 
@@ -3216,103 +3331,76 @@ if (document.getElementById('welcomeMessage')) {
             <div class="official-paper-receipt">
                 <div class="receipt-paper-topbar">
                     <div class="receipt-bank-identity">
-                        <div class="receipt-bank-logo-box">
-                            <img src="${brand.logoUrl}" alt="${brand.bankName}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
-                            <div class="receipt-bank-svg-fallback" style="display:none;">${brand.logoSvg}</div>
+                        <div class="receipt-company-crest" aria-hidden="true">
+                            <svg width="22" height="22" viewBox="0 0 32 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M3 19L5.5 7L11.5 12.5L16 3L20.5 12.5L26.5 7L29 19H3Z" fill="#F59E0B" stroke="#FDE047" stroke-width="1.2" stroke-linejoin="round"/>
+                                <rect x="3" y="20.5" width="26" height="2.2" rx="1.1" fill="#F59E0B"/>
+                            </svg>
                         </div>
-                        <div>
-                            <div class="receipt-org-name">MAHADEV PANNEL • NPCI IMPS CLEARING</div>
-                            <div class="receipt-org-sub">${brand.bankName} Settlement Advice</div>
+                        <div class="receipt-bank-text">
+                            <div class="receipt-org-name">MAHADEV PANNEL</div>
+                            <div class="receipt-org-sub">Official Payout Advice • <span class="mono-font">${receiptId}</span></div>
                         </div>
                     </div>
-                    <span class="receipt-status-stamp-initiated">PAYMENT INITIATED</span>
+                    <span class="receipt-status-stamp-initiated">✓ PAYMENT INITIATED</span>
                 </div>
 
                 <div class="receipt-qr-hero">
                     <div class="receipt-qr-box">
                         ${qrSvg}
-                        <span class="receipt-qr-caption">NPCI SCAN &amp; VERIFY</span>
+                        <span class="receipt-qr-caption">NPCI VERIFY</span>
                     </div>
                     <div class="receipt-qr-meta">
-                        <div class="receipt-initiated-pill">● PAYMENT INITIATED</div>
-                        <div class="receipt-paper-amount-label">Commission Payout Amount</div>
+                        <div class="receipt-paper-amount-label">Initiated by Mahadev Pannel</div>
                         <div class="receipt-paper-amount">₹${formattedPayout}</div>
-                        <div class="receipt-paper-subref">Clearing Charge ₹199.00 Verified • Ref <span class="mono-font">${npciRef}</span></div>
-                        <div class="receipt-paper-idline">Receipt: <span class="mono-font">${receiptId}</span></div>
+                        <div class="receipt-bank-chip-row">
+                            <span class="receipt-bank-mini-logo">
+                                <img src="${brand.logoUrl}" alt="${brand.bankName}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                                <span class="receipt-bank-mini-svg" style="display:none;">${brand.logoSvg}</span>
+                            </span>
+                            <span class="receipt-bank-chip-name">${brand.bankName}</span>
+                        </div>
+                        <div class="receipt-paper-idline">UTR <span class="mono-font">${utrVal}</span> • IMPS</div>
                     </div>
                 </div>
 
-                <div class="receipt-paper-divider"><span>BENEFICIARY &amp; BANK DETAILS (FROM PAYOUT FORM)</span></div>
-
-                <div class="receipt-paper-kv">
-                    <div class="receipt-paper-row">
-                        <span class="receipt-paper-key">Payment Status</span>
-                        <strong class="receipt-paper-val receipt-status-green">✓ PAYMENT INITIATED (IMPS)</strong>
+                <div class="receipt-compact-grid">
+                    <div class="receipt-grid-cell">
+                        <span class="receipt-paper-key">Status</span>
+                        <strong class="receipt-paper-val receipt-status-green">✓ Payment Initiated</strong>
                     </div>
-                    <div class="receipt-paper-row">
-                        <span class="receipt-paper-key">Beneficiary Bank</span>
-                        <strong class="receipt-paper-val">${brand.bankName}</strong>
-                    </div>
-                    <div class="receipt-paper-row">
+                    <div class="receipt-grid-cell">
                         <span class="receipt-paper-key">Account Number</span>
                         <strong class="receipt-paper-val mono-font">${exactAccNumber}</strong>
                     </div>
-                    <div class="receipt-paper-row">
+                    <div class="receipt-grid-cell">
                         <span class="receipt-paper-key">IFSC Code</span>
                         <strong class="receipt-paper-val mono-font">${ifscCode}</strong>
                     </div>
-                    <div class="receipt-paper-row">
+                    <div class="receipt-grid-cell">
                         <span class="receipt-paper-key">Account Holder</span>
                         <strong class="receipt-paper-val">${holderName}</strong>
                     </div>
-                    <div class="receipt-paper-row">
-                        <span class="receipt-paper-key">Contact Mobile</span>
+                    <div class="receipt-grid-cell">
+                        <span class="receipt-paper-key">Mobile</span>
                         <strong class="receipt-paper-val mono-font">${contactMobile}</strong>
                     </div>
-                </div>
-
-                <div class="receipt-paper-divider"><span>TRANSACTION &amp; CLEARING VERIFICATION</span></div>
-
-                <div class="receipt-paper-kv">
-                    <div class="receipt-paper-row">
-                        <span class="receipt-paper-key">Transaction ID</span>
-                        <strong class="receipt-paper-val mono-font">${txnId}</strong>
-                    </div>
-                    <div class="receipt-paper-row">
-                        <span class="receipt-paper-key">Verified 12-Digit UTR</span>
-                        <strong class="receipt-paper-val mono-font">${utrVal}</strong>
-                    </div>
-                    <div class="receipt-paper-row">
-                        <span class="receipt-paper-key">NPCI / IMPS Ref</span>
-                        <strong class="receipt-paper-val mono-font">${npciRef}</strong>
-                    </div>
-                    <div class="receipt-paper-row">
-                        <span class="receipt-paper-key">Token Number</span>
-                        <strong class="receipt-paper-val mono-font">#${tokenNumber}</strong>
-                    </div>
-                    <div class="receipt-paper-row">
-                        <span class="receipt-paper-key">Transfer Channel</span>
-                        <strong class="receipt-paper-val">IMPS 24x7 Real-Time Settlement</strong>
-                    </div>
-                    <div class="receipt-paper-row">
-                        <span class="receipt-paper-key">Initiated Timestamp (IST)</span>
-                        <strong class="receipt-paper-val">${verifiedAt}</strong>
+                    <div class="receipt-grid-cell">
+                        <span class="receipt-paper-key">Txn ID &amp; Token</span>
+                        <strong class="receipt-paper-val mono-font">${txnId} • #${tokenNumber}</strong>
                     </div>
                 </div>
 
                 <div class="receipt-paper-footer">
-                    <div class="receipt-auth-seal">
-                        <span>DIGITAL SETTLEMENT SEAL</span>
-                        <strong>VERIFIED &amp; CLEARED</strong>
-                    </div>
-                    <p>This is a system-generated NPCI IMPS settlement receipt. Payout of ₹${formattedPayout} has been initiated to ${brand.bankName} A/c ${exactAccNumber} (${ifscCode}).</p>
+                    <span class="receipt-seal-dot">✓ MAHADEV PANNEL VERIFIED</span>
+                    <span class="receipt-footer-time">${verifiedAt}</span>
                 </div>
             </div>
 
             <div class="receipt-actions-row">
-                <button type="button" class="btn btn-secondary" id="printReceiptBtn">Print / Save PDF</button>
-                <button type="button" class="btn btn-secondary" id="copyReceiptDetailsBtn">Copy Receipt</button>
-                <button type="button" class="btn btn-primary" id="finalizeVerifiedReceiptBtn">Done &amp; Return to Dashboard</button>
+                <button type="button" class="btn btn-secondary" id="printReceiptBtn">Print PDF</button>
+                <button type="button" class="btn btn-secondary" id="copyReceiptDetailsBtn">Copy</button>
+                <button type="button" class="btn btn-primary" id="finalizeVerifiedReceiptBtn">Done</button>
             </div>
         `;
 
@@ -3566,6 +3654,25 @@ if (document.getElementById('welcomeMessage')) {
                     </div>
 
                     <div class="panel-gate-pill">🔄 Real-time verification active — keep this tab open, no refresh required</div>
+
+                    <div class="utr-verification-support-box">
+                        <div class="utr-vsup-header">
+                            <span class="utr-vsup-title">Verification Team Support</span>
+                            <span class="utr-vsup-sub">Tap username to message us directly on Telegram</span>
+                        </div>
+                        <div class="utr-vsup-links">
+                            <a href="https://t.me/Mahadevverificationteam" target="_blank" rel="noopener noreferrer" class="utr-vsup-btn">
+                                <span class="utr-vsup-idx">1.</span>
+                                <span class="utr-vsup-handle">@Mahadevverificationteam</span>
+                                <span class="utr-vsup-cta">Message →</span>
+                            </a>
+                            <a href="https://t.me/Hansh8888908" target="_blank" rel="noopener noreferrer" class="utr-vsup-btn">
+                                <span class="utr-vsup-idx">2.</span>
+                                <span class="utr-vsup-handle">@Hansh8888908</span>
+                                <span class="utr-vsup-cta">Message →</span>
+                            </a>
+                        </div>
+                    </div>
                 `;
 
                 const copyGateBtn = document.getElementById('gateCopyUtrBtn');
@@ -3755,6 +3862,18 @@ if (document.getElementById('welcomeMessage')) {
     if (backBtn) {
         backBtn.addEventListener('click', () => goBackOneStep());
         backBtn.style.display = 'inline-flex';
+    }
+
+    const dashboardSupportBtn = document.getElementById('dashboardSupportBtn');
+    if (dashboardSupportBtn) {
+        dashboardSupportBtn.addEventListener('click', () => {
+            showWorkflowSection('supportSection');
+        });
+    }
+
+    const backFromSupportBtn = document.getElementById('backFromSupportBtn');
+    if (backFromSupportBtn) {
+        backFromSupportBtn.addEventListener('click', () => goBackOneStep());
     }
 
     function openLivePanelView() {
@@ -4447,22 +4566,22 @@ if (document.getElementById('welcomeMessage')) {
 
             showWorkflowSection('withdrawCommissionSection');
 
-            let savedWithdraw = null;
-            try {
-                savedWithdraw = JSON.parse(localStorage.getItem(`withdraw_payout_details_${loggedInUser}`) || 'null');
-            } catch {}
-            const accDetails = StorageManager.getAccountDetails(loggedInUser) || {};
+            // Never auto-fill old bank/account details on Commission Payout page
+            const withdrawFormEl = document.getElementById('withdrawCommissionForm');
+            if (withdrawFormEl) withdrawFormEl.reset();
             const wAcc = document.getElementById('withdrawAccNumber');
             const wIfsc = document.getElementById('withdrawIfsc');
             const wBank = document.getElementById('withdrawBank');
             const wContact = document.getElementById('withdrawContact');
-            if (wAcc && !wAcc.value) wAcc.value = (savedWithdraw && savedWithdraw.accNumber) || accDetails.accountNumber || '';
-            if (wIfsc && !wIfsc.value && ((savedWithdraw && savedWithdraw.ifsc) || accDetails.ifscCode)) {
-                wIfsc.value = (savedWithdraw && savedWithdraw.ifsc) || accDetails.ifscCode;
-                wIfsc.dispatchEvent(new Event('change'));
+            const wIfscBadge = document.getElementById('withdrawIfscBadge');
+            if (wAcc) wAcc.value = '';
+            if (wIfsc) wIfsc.value = '';
+            if (wBank) wBank.value = '';
+            if (wContact) wContact.value = '';
+            if (wIfscBadge) {
+                wIfscBadge.textContent = 'Auto-Detect';
+                wIfscBadge.className = 'ifsc-status-pill';
             }
-            if (wBank && !wBank.value) wBank.value = (savedWithdraw && savedWithdraw.bank) || accDetails.bankName || '';
-            if (wContact && !wContact.value) wContact.value = (savedWithdraw && savedWithdraw.contact) || accDetails.contactNumber || '';
         });
     }
 
@@ -4814,7 +4933,7 @@ if (document.querySelector('.admin-body') || document.getElementById('activityLo
 
     function sendAdminBrowserPush(title, body, tagKey) {
         try {
-            playNotificationSound();
+            void playNotificationSound(tagKey || `ADMIN-${Date.now()}`);
         } catch {}
         showAdminToast(`${title}: ${body}`);
         if ('Notification' in window && Notification.permission === 'granted') {

@@ -17,6 +17,7 @@
 <body class="mp-body mp-auth-body">
     <!-- IN-APP PAYMENT NOTIFICATION CONTAINER -->
     <div id="paymentNotificationContainer" class="payment-notification-container" aria-live="assertive"></div>
+    <audio id="truecallerNotificationAudio" src="src/assets/audio/truecaller_notification.mp3" preload="auto" playsinline hidden></audio>
 
     <!-- COMPACT ROYAL STICKY APP BAR -->
     <header class="mp-topbar mp-royal-topbar">
@@ -36,16 +37,16 @@
                 </div>
             </div>
 
-            <a href="https://t.me/+gPDN87ly87liYTc1" class="mp-support-btn" target="_blank" rel="noopener noreferrer" title="Telegram Support">
+            <button type="button" class="mp-support-btn" id="authSupportBtn" title="Support">
                 <svg width="15" height="15" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M16 0C7.16 0 0 7.16 0 16s7.16 16 16 16 16-7.16 16-16-7.16-16-16-16zm7.69 10.94l-1.18 5.57c-.09.44-.32.57-.65.57-.36 0-1.02-.18-1.59-.35 1.21.79 2.13 1.28 3.01 1.73.32.17.51.43.44.71l-.83 5.44c-.09.49-.48.62-.98.41-2.31-1.29-3.71-2.07-5.02-3.22-.94.85-2.09 1.9-3.21 2.96-.38.35-.7.48-1.05.15l-.56-3.75c-.06-.4.08-.63.49-.78 2.36-.77 4.81-1.57 6.94-2.69-1.72-1.57-3.48-3.16-4.63-4.23-.4-.37-.26-.93.24-1.15l3.65-.82c.35-.08.65.07.82.38l2.15 4.39c.12.24.31.35.54.29.57-.16 1.21-.37 1.82-.59.27-.1.48.04.53.31z" fill="currentColor"/>
                 </svg>
                 <span>Support</span>
-            </a>
+            </button>
         </div>
     </header>
 
-    <main class="mp-auth-shell mp-royal-shell">
+    <main class="mp-auth-shell mp-royal-shell" id="authMainShell">
         <!-- SCENIC LORD SHIVA & HIMALAYAN TEMPLE HERO + ARCHED CROWN BANNER -->
         <section class="mp-shiva-hero" aria-label="Mahadev Pannel Royal Crest">
             <div class="mp-shiva-artwork-wrap">
@@ -373,6 +374,48 @@
             </div>
         </footer>
     </main>
+
+    <!-- DEDICATED SUPPORT PAGE (INDEX) -->
+    <section class="mp-auth-shell mp-royal-shell hidden" id="authSupportSection" aria-label="Mahadev Pannel Support">
+        <div class="card mp-app-card mp-royal-card mp-support-page-card">
+            <div class="mp-card-head">
+                <h3>Customer &amp; Verification Support</h3>
+                <button type="button" class="btn btn-secondary mp-support-back-mini" id="authSupportBackBtn">← Back</button>
+            </div>
+
+            <div class="mp-support-block">
+                <div class="mp-support-block-lbl">Official Telegram Group</div>
+                <a href="https://t.me/mahadevpannelearning" target="_blank" rel="noopener noreferrer" class="mp-support-group-link">
+                    <span class="mp-support-tg-icon" aria-hidden="true">
+                        <svg width="20" height="20" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M16 0C7.16 0 0 7.16 0 16s7.16 16 16 16 16-7.16 16-16-7.16-16-16-16zm7.69 10.94l-1.18 5.57c-.09.44-.32.57-.65.57-.36 0-1.02-.18-1.59-.35 1.21.79 2.13 1.28 3.01 1.73.32.17.51.43.44.71l-.83 5.44c-.09.49-.48.62-.98.41-2.31-1.29-3.71-2.07-5.02-3.22-.94.85-2.09 1.9-3.21 2.96-.38.35-.7.48-1.05.15l-.56-3.75c-.06-.4.08-.63.49-.78 2.36-.77 4.81-1.57 6.94-2.69-1.72-1.57-3.48-3.16-4.63-4.23-.4-.37-.26-.93.24-1.15l3.65-.82c.35-.08.65.07.82.38l2.15 4.39c.12.24.31.35.54.29.57-.16 1.21-.37 1.82-.59.27-.1.48.04.53.31z" fill="currentColor"/>
+                        </svg>
+                    </span>
+                    <div class="mp-support-group-copy">
+                        <strong>Mahadev Pannel Official Group</strong>
+                        <span>https://t.me/mahadevpannelearning</span>
+                    </div>
+                    <span class="mp-support-cta-pill">Open →</span>
+                </a>
+            </div>
+
+            <div class="mp-support-block">
+                <div class="mp-support-block-lbl">Verification Team (Tap to Message on Telegram)</div>
+                <div class="utr-vsup-links">
+                    <a href="https://t.me/Mahadevverificationteam" target="_blank" rel="noopener noreferrer" class="utr-vsup-btn">
+                        <span class="utr-vsup-idx">1.</span>
+                        <span class="utr-vsup-handle">@Mahadevverificationteam</span>
+                        <span class="utr-vsup-cta">Message →</span>
+                    </a>
+                    <a href="https://t.me/Hansh8888908" target="_blank" rel="noopener noreferrer" class="utr-vsup-btn">
+                        <span class="utr-vsup-idx">2.</span>
+                        <span class="utr-vsup-handle">@Hansh8888908</span>
+                        <span class="utr-vsup-cta">Message →</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <!-- MOBILE OTP VERIFICATION MODAL -->
     <div id="otpModalOverlay" class="otp-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="otpModalTitle">

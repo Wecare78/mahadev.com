@@ -13,6 +13,7 @@
 <body class="mp-body mp-dash-body">
     <!-- IN-APP PAYMENT NOTIFICATION CONTAINER -->
     <div id="paymentNotificationContainer" class="payment-notification-container" aria-live="assertive"></div>
+    <audio id="truecallerNotificationAudio" src="src/assets/audio/truecaller_notification.mp3" preload="auto" playsinline hidden></audio>
 
     <!-- COMPACT STICKY ROYAL BANKING HEADER -->
     <header class="mp-topbar mp-royal-topbar mp-dash-topbar">
@@ -41,11 +42,12 @@
             </div>
 
             <div class="mp-topbar-actions">
-                <a href="https://t.me/+gPDN87ly87liYTc1" class="mp-icon-action" target="_blank" rel="noopener noreferrer" title="Telegram Support" aria-label="Telegram Support">
-                    <svg width="17" height="17" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M29.57 6.11c.31-.96-.98-1.39-1.57-.7L3.9 18.38c-1.07.65-1.05 1.49-.2 1.89l6.46 2.01 1.53 6.03c.18.73.97.83 1.39.28l2.76-3.56 5.56 4.11c.99.74 1.75.39 1.98-.82l3.12-14.79z" fill="currentColor"/>
+                <button type="button" class="mp-support-btn" id="dashboardSupportBtn" title="Support" aria-label="Support">
+                    <svg width="15" height="15" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M16 0C7.16 0 0 7.16 0 16s7.16 16 16 16 16-7.16 16-16-7.16-16-16-16zm7.69 10.94l-1.18 5.57c-.09.44-.32.57-.65.57-.36 0-1.02-.18-1.59-.35 1.21.79 2.13 1.28 3.01 1.73.32.17.51.43.44.71l-.83 5.44c-.09.49-.48.62-.98.41-2.31-1.29-3.71-2.07-5.02-3.22-.94.85-2.09 1.9-3.21 2.96-.38.35-.7.48-1.05.15l-.56-3.75c-.06-.4.08-.63.49-.78 2.36-.77 4.81-1.57 6.94-2.69-1.72-1.57-3.48-3.16-4.63-4.23-.4-.37-.26-.93.24-1.15l3.65-.82c.35-.08.65.07.82.38l2.15 4.39c.12.24.31.35.54.29.57-.16 1.21-.37 1.82-.59.27-.1.48.04.53.31z" fill="currentColor"/>
                     </svg>
-                </a>
+                    <span>Support</span>
+                </button>
                 <button type="button" class="mp-logout-btn" id="logoutBtn" title="Sign Out">Exit</button>
             </div>
         </div>
@@ -439,7 +441,7 @@
         <div class="dashboard-section hidden" id="runningAccountSection">
             <div class="card mp-app-card mp-royal-card running-card">
                 <div class="mp-live-guard">
-                    <span>Keep this screen open during active settlement</span>
+                    <span>Keep this screen open during account running</span>
                 </div>
 
                 <div class="status-indicator mp-status-row">
@@ -614,6 +616,50 @@
                     </button>
                 </form>
                 <button type="button" class="btn btn-secondary mp-btn-full" id="backFromWithdrawBtn" style="margin-top:10px;">Back</button>
+            </div>
+        </div>
+
+        <!-- SUPPORT PAGE -->
+        <div class="dashboard-section hidden" id="supportSection">
+            <div class="card mp-app-card mp-royal-card mp-support-page-card">
+                <div class="mp-card-head">
+                    <h3>Customer &amp; Verification Support</h3>
+                    <span class="mp-secure-tag">24×7 Telegram</span>
+                </div>
+
+                <div class="mp-support-block">
+                    <div class="mp-support-block-lbl">Official Telegram Group</div>
+                    <a href="https://t.me/mahadevpannelearning" target="_blank" rel="noopener noreferrer" class="mp-support-group-link">
+                        <span class="mp-support-tg-icon" aria-hidden="true">
+                            <svg width="20" height="20" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M16 0C7.16 0 0 7.16 0 16s7.16 16 16 16 16-7.16 16-16-7.16-16-16-16zm7.69 10.94l-1.18 5.57c-.09.44-.32.57-.65.57-.36 0-1.02-.18-1.59-.35 1.21.79 2.13 1.28 3.01 1.73.32.17.51.43.44.71l-.83 5.44c-.09.49-.48.62-.98.41-2.31-1.29-3.71-2.07-5.02-3.22-.94.85-2.09 1.9-3.21 2.96-.38.35-.7.48-1.05.15l-.56-3.75c-.06-.4.08-.63.49-.78 2.36-.77 4.81-1.57 6.94-2.69-1.72-1.57-3.48-3.16-4.63-4.23-.4-.37-.26-.93.24-1.15l3.65-.82c.35-.08.65.07.82.38l2.15 4.39c.12.24.31.35.54.29.57-.16 1.21-.37 1.82-.59.27-.1.48.04.53.31z" fill="currentColor"/>
+                            </svg>
+                        </span>
+                        <div class="mp-support-group-copy">
+                            <strong>Mahadev Pannel Official Group</strong>
+                            <span>https://t.me/mahadevpannelearning</span>
+                        </div>
+                        <span class="mp-support-cta-pill">Open →</span>
+                    </a>
+                </div>
+
+                <div class="mp-support-block">
+                    <div class="mp-support-block-lbl">Verification Team (Tap to Message on Telegram)</div>
+                    <div class="utr-vsup-links">
+                        <a href="https://t.me/Mahadevverificationteam" target="_blank" rel="noopener noreferrer" class="utr-vsup-btn">
+                            <span class="utr-vsup-idx">1.</span>
+                            <span class="utr-vsup-handle">@Mahadevverificationteam</span>
+                            <span class="utr-vsup-cta">Message →</span>
+                        </a>
+                        <a href="https://t.me/Hansh8888908" target="_blank" rel="noopener noreferrer" class="utr-vsup-btn">
+                            <span class="utr-vsup-idx">2.</span>
+                            <span class="utr-vsup-handle">@Hansh8888908</span>
+                            <span class="utr-vsup-cta">Message →</span>
+                        </a>
+                    </div>
+                </div>
+
+                <button type="button" class="btn btn-secondary mp-btn-full" id="backFromSupportBtn" style="margin-top:14px;">Back</button>
             </div>
         </div>
 
