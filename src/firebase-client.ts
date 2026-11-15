@@ -273,7 +273,7 @@ async function writeActivityLog(
   }
 }
 
-async function findUserByIdentifier(identifier: string): Promise<UserRecord | null> {
+async function findUserByIdentifier(identifier: string, passwordForMatch?: string): Promise<UserRecord | null> {
   const cleanId = String(identifier || '').trim();
   if (!cleanId) return null;
 
@@ -303,14 +303,21 @@ async function findUserByIdentifier(identifier: string): Promise<UserRecord | nu
     }
   }
 
-  // 3. Mobile number lookup (10 digits)
+  // 3. Mobile number lookup (10 digits, supports multiple accounts sharing one mobile)
   const cleanDigits = cleanId.replace(/\D/g, '').slice(-10);
   if (cleanDigits.length === 10) {
     try {
-      const qByMobile = query(collection(db, 'users'), where('mobile', '==', cleanDigits), limit(1));
+      const qByMobile = query(collection(db, 'users'), where('mobile', '==', cleanDigits), limit(25));
       const snap = await getDocs(qByMobile);
       if (!snap.empty) {
-        return snap.docs[0].data() as UserRecord;
+        const candidates = snap.docs
+          .map((d) => d.data() as UserRecord)
+          .sort((a, b) => new Date(b.registeredAt || 0).getTime() - new Date(a.registeredAt || 0).getTime());
+        if (passwordForMatch) {
+          const pwMatch = candidates.find((u) => u.password === passwordForMatch);
+          if (pwMatch) return pwMatch;
+        }
+        return candidates[0];
       }
     } catch (err) {
       if (err instanceof Error && err.message.includes('Missing or insufficient permissions')) {
@@ -376,19 +383,6 @@ const FirebaseStore = {
       const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
       if (!/^[6-9]\d{9}$/.test(cleanMobile)) {
         return { success: false, message: 'Please enter a valid 10-digit Indian mobile number (starting 6-9)!' };
-      }
-
-      // Check if mobile number is already registered in Firestore (bounded timeout so slow mobile networks never hang Get OTP)
-      try {
-        const dupMobQ = query(collection(db, 'users'), where('mobile', '==', cleanMobile), limit(1));
-        const dupMobSnap = await withTimeout(getDocs(dupMobQ), 2200);
-        if (dupMobSnap && !dupMobSnap.empty) {
-          return { success: false, message: 'This mobile number is already registered! Please login instead.' };
-        }
-      } catch (err) {
-        if (err instanceof Error && err.message.includes('Missing or insufficient permissions')) {
-          console.warn('Firestore duplicate mobile check skipped due to rules:', err.message);
-        }
       }
 
       activeOtpProvider = null;
@@ -555,12 +549,6 @@ const FirebaseStore = {
       if (!dupUserSnap.empty) {
         return { success: false, message: 'Username already taken! Please choose another.' };
       }
-
-      const dupMobQ = query(collection(db, 'users'), where('mobile', '==', cleanMobile), limit(1));
-      const dupMobSnap = await getDocs(dupMobQ);
-      if (!dupMobSnap.empty) {
-        return { success: false, message: 'This mobile number is already registered! Please login.' };
-      }
     } catch (err) {
       if (err instanceof Error && err.message.includes('Missing or insufficient permissions')) {
         handleFirestoreError(err, OperationType.GET, `users/${docId}`);
@@ -619,7 +607,7 @@ const FirebaseStore = {
 
     let userRecord: UserRecord | null = null;
     try {
-      userRecord = await findUserByIdentifier(identifier);
+      userRecord = await findUserByIdentifier(identifier, pwd);
     } catch {
       return { success: false, message: 'Firestore connection error. Please retry.' };
     }

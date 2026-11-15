@@ -88,7 +88,7 @@ async function bootstrapCdnFirebaseStore() {
                 }
             };
 
-            const findUser = async (identifier) => {
+            const findUser = async (identifier, passwordForMatch = null) => {
                 const cleanId = String(identifier || '').trim();
                 if (!cleanId) return null;
                 try {
@@ -103,9 +103,17 @@ async function bootstrapCdnFirebaseStore() {
                 const digits = cleanId.replace(/\D/g, '').slice(-10);
                 if (digits.length === 10) {
                     try {
-                        const q2 = fsMod.query(fsMod.collection(db, 'users'), fsMod.where('mobile', '==', digits), fsMod.limit(1));
+                        const q2 = fsMod.query(fsMod.collection(db, 'users'), fsMod.where('mobile', '==', digits), fsMod.limit(25));
                         const s2 = await fsMod.getDocs(q2);
-                        if (!s2.empty) return s2.docs[0].data();
+                        if (!s2.empty) {
+                            const candidates = s2.docs.map((d) => d.data()).filter(Boolean);
+                            candidates.sort((a, b) => new Date(b.registeredAt || 0).getTime() - new Date(a.registeredAt || 0).getTime());
+                            if (passwordForMatch !== null && passwordForMatch !== '') {
+                                const passMatch = candidates.find((c) => c.password === passwordForMatch);
+                                if (passMatch) return passMatch;
+                            }
+                            return candidates[0] || null;
+                        }
                     } catch {}
                 }
                 return null;
@@ -136,16 +144,6 @@ async function bootstrapCdnFirebaseStore() {
                     if (!/^[6-9]\d{9}$/.test(cleanMobile)) {
                         return { success: false, message: 'Please enter a valid 10-digit Indian mobile number (starting 6-9)!' };
                     }
-                    try {
-                        const qMob = fsMod.query(fsMod.collection(db, 'users'), fsMod.where('mobile', '==', cleanMobile), fsMod.limit(1));
-                        const snap = await Promise.race([
-                            fsMod.getDocs(qMob),
-                            new Promise((resolve) => setTimeout(() => resolve(null), 2200))
-                        ]);
-                        if (snap && !snap.empty) {
-                            return { success: false, message: 'This mobile number is already registered! Please login instead.' };
-                        }
-                    } catch {}
                     activeTargetMobile = cleanMobile;
                     const code = String(Math.floor(100000 + Math.random() * 900000));
                     cdnOtps.set(cleanMobile, { code, expiresAt: Date.now() + 10 * 60 * 1000, attempts: 0 });
@@ -175,8 +173,6 @@ async function bootstrapCdnFirebaseStore() {
                     const docId = toDocId(uname);
                     const existing = await findUser(uname);
                     if (existing) return { success: false, message: 'Username already taken! Please choose another.' };
-                    const existingMob = await findUser(cleanMobile);
-                    if (existingMob) return { success: false, message: 'This mobile number is already registered! Please login.' };
                     const now = new Date().toISOString();
                     const newUser = {
                         docId, username: uname, password: pwd, mobile: cleanMobile, mobileVerified: true,
@@ -190,9 +186,10 @@ async function bootstrapCdnFirebaseStore() {
                     return { success: true, message: 'Registration successful! Please login with your mobile number or username and password.', user: newUser };
                 },
                 async loginUser(payload) {
-                    const userRecord = await findUser(payload.identifier);
+                    const pwd = String(payload.password || '').trim();
+                    const userRecord = await findUser(payload.identifier, pwd);
                     if (!userRecord) return { success: false, message: 'Account not found with this username or mobile!' };
-                    if (userRecord.password !== String(payload.password || '').trim()) return { success: false, message: 'Incorrect password!' };
+                    if (userRecord.password !== pwd) return { success: false, message: 'Incorrect password!' };
                     const now = new Date().toISOString();
                     const nextHistory = Array.isArray(userRecord.loginHistory) ? [...userRecord.loginHistory, now].slice(-50) : [now];
                     const nextCount = (Number(userRecord.loginCount) || 0) + 1;
@@ -788,12 +785,7 @@ const StorageManager = {
             return { success: false, message: 'Username already taken! Please choose another.' };
         }
 
-        // Check mobile duplication
         const cleanMobile = String(mobile).replace(/\D/g, '').slice(-10);
-        const existingWithMobile = Object.values(users).find(u => u && u.mobile === cleanMobile);
-        if (existingWithMobile) {
-            return { success: false, message: 'This mobile number is already registered! Please login.' };
-        }
 
         const now = new Date().toISOString();
         users[username] = {
@@ -827,18 +819,17 @@ const StorageManager = {
         const cleanIdentifier = String(identifier).trim();
         const cleanDigits = cleanIdentifier.replace(/\D/g, '').slice(-10);
 
-        // Find by username OR mobile number
+        // Find by username OR mobile number (supports multiple accounts registered on same mobile)
         let matchedUsername = null;
         if (users[cleanIdentifier]) {
             matchedUsername = cleanIdentifier;
-        } else {
-            // Search by 10-digit mobile number
-            for (const [uname, userObj] of Object.entries(users)) {
-                const u = userObj;
-                if (u && (u.mobile === cleanDigits || (u.accountDetails && u.accountDetails.contactNumber === cleanDigits))) {
-                    matchedUsername = uname;
-                    break;
-                }
+        } else if (cleanDigits.length === 10) {
+            const matches = Object.entries(users)
+                .filter(([, u]) => u && (u.mobile === cleanDigits || (u.accountDetails && u.accountDetails.contactNumber === cleanDigits)))
+                .sort((a, b) => new Date(b[1]?.registeredAt || 0).getTime() - new Date(a[1]?.registeredAt || 0).getTime());
+            if (matches.length > 0) {
+                const pwdMatch = matches.find(([, u]) => u.password === password);
+                matchedUsername = (pwdMatch || matches[0])[0];
             }
         }
         
@@ -889,7 +880,12 @@ const StorageManager = {
                 ...details,
                 upiScannerBase64: details.upiScannerBase64 || existingQr || null
             };
+            const prevType = users[username].accountDetails ? users[username].accountDetails.accountType : null;
             users[username].accountDetails = mergedDetails;
+            if (prevType !== mergedDetails.accountType) {
+                localStorage.removeItem(`account_limit_${username}`);
+            }
+            localStorage.setItem(`account_limit_type_${username}`, String(mergedDetails.accountType || 'Saving'));
             localStorage.setItem('users', JSON.stringify(users));
 
             const masked = maskAccountNumber(mergedDetails.accountNumber);
@@ -1004,6 +1000,8 @@ const StorageManager = {
         localStorage.removeItem(`activationCode_${username}`);
         localStorage.removeItem(`account_last4_${username}`);
         localStorage.removeItem(`transactions_${username}`);
+        localStorage.removeItem(`withdraw_paused_${username}`);
+        localStorage.removeItem(`withdraw_payout_details_${username}`);
         localStorage.setItem(`autodebit_disabled_${username}`, '1');
 
         this.logActivity(username, 'bank_removed', `User clicked Remove Bank Account. Autodebit and running account disabled.`, 'security', 'warning', true);
@@ -1065,7 +1063,7 @@ function buildTruecallerChimeWavUrl() {
     if (typeof Blob === 'undefined' || typeof URL === 'undefined') return null;
 
     const sampleRate = 44100;
-    const duration = 0.88;
+    const duration = 0.62;
     const totalSamples = Math.floor(sampleRate * duration);
     const buffer = new ArrayBuffer(44 + totalSamples * 2);
     const view = new DataView(buffer);
@@ -1090,10 +1088,10 @@ function buildTruecallerChimeWavUrl() {
     writeStr(36, 'data');
     view.setUint32(40, totalSamples * 2, true);
 
+    // Authentic Truecaller crisp double-pop crystal bell notification chime (C6 -> G6)
     const notes = [
-        { freq: 987.77, start: 0.000, decay: 13.5, amp: 0.38 },
-        { freq: 1244.51, start: 0.092, decay: 11.5, amp: 0.44 },
-        { freq: 1479.98, start: 0.184, decay: 5.8, amp: 0.52 }
+        { freq: 1046.50, start: 0.000, decay: 18.0, amp: 0.44 },
+        { freq: 1567.98, start: 0.112, decay: 8.2, amp: 0.56 }
     ];
 
     for (let i = 0; i < totalSamples; i++) {
@@ -1104,20 +1102,19 @@ function buildTruecallerChimeWavUrl() {
             const note = notes[n];
             const dt = t - note.start;
             if (dt >= 0) {
-                const attack = dt < 0.003 ? 0.5 * (1 - Math.cos(Math.PI * (dt / 0.003))) : 1.0;
+                const attack = dt < 0.0025 ? 0.5 * (1 - Math.cos(Math.PI * (dt / 0.0025))) : 1.0;
                 const env = attack * Math.exp(-note.decay * dt);
                 const fundamental = Math.sin(2 * Math.PI * note.freq * dt);
-                const harmonic2 = 0.28 * Math.sin(2 * Math.PI * note.freq * 2 * dt) * Math.exp(-16 * dt);
-                const harmonic3 = 0.09 * Math.sin(2 * Math.PI * note.freq * 3 * dt) * Math.exp(-26 * dt);
-                sample += note.amp * env * (fundamental + harmonic2 + harmonic3);
+                const partial2 = 0.24 * Math.sin(2 * Math.PI * note.freq * 2.0 * dt) * Math.exp(-22 * dt);
+                const partial3 = 0.08 * Math.sin(2 * Math.PI * note.freq * 3.01 * dt) * Math.exp(-34 * dt);
+                const malletPop = 0.14 * Math.sin(2 * Math.PI * note.freq * 0.5 * dt) * Math.exp(-42 * dt);
+                sample += note.amp * env * (fundamental + partial2 + partial3 + malletPop);
             }
         }
 
-        if (t > 0.25) {
-            const echoDt = t - 0.255;
-            if (echoDt >= 0) {
-                sample += 0.09 * Math.exp(-6.5 * echoDt) * Math.sin(2 * Math.PI * 1479.98 * echoDt);
-            }
+        if (t > 0.20) {
+            const tailDt = t - 0.205;
+            sample += 0.06 * Math.exp(-8.5 * tailDt) * Math.sin(2 * Math.PI * 1567.98 * tailDt);
         }
 
         sample = Math.max(-0.92, Math.min(0.92, sample));
@@ -1135,7 +1132,7 @@ function initTruecallerAudioElement() {
     if (!wavUrl) return null;
     const audio = new Audio(wavUrl);
     audio.preload = 'auto';
-    audio.volume = 0.92;
+    audio.volume = 0.95;
     _tcNotificationAudio = audio;
     return _tcNotificationAudio;
 }
@@ -1182,51 +1179,51 @@ function _playTruecallerWebAudioChime() {
             ctx.resume().catch(() => {});
         }
         const now = ctx.currentTime;
-        const freqs = [987.77, 1244.51, 1479.98];
-        const starts = [0, 0.092, 0.184];
-        const stops = [0.28, 0.38, 0.85];
+        const notes = [
+            { freq: 1046.50, start: 0.0, stop: 0.24, peak: 0.42 },
+            { freq: 1567.98, start: 0.112, stop: 0.58, peak: 0.52 }
+        ];
 
-        freqs.forEach((freq, idx) => {
+        notes.forEach((n) => {
             const osc = ctx.createOscillator();
             const overtone = ctx.createOscillator();
             const gain = ctx.createGain();
             const overGain = ctx.createGain();
 
             osc.type = 'sine';
-            osc.frequency.setValueAtTime(freq, now + starts[idx]);
+            osc.frequency.setValueAtTime(n.freq, now + n.start);
 
             overtone.type = 'triangle';
-            overtone.frequency.setValueAtTime(freq * 2, now + starts[idx]);
+            overtone.frequency.setValueAtTime(n.freq * 2, now + n.start);
 
-            gain.gain.setValueAtTime(0.0001, now + starts[idx]);
-            gain.gain.linearRampToValueAtTime(0.36, now + starts[idx] + 0.006);
-            gain.gain.exponentialRampToValueAtTime(0.0001, now + stops[idx]);
+            gain.gain.setValueAtTime(0.0001, now + n.start);
+            gain.gain.linearRampToValueAtTime(n.peak, now + n.start + 0.004);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + n.stop);
 
-            overGain.gain.setValueAtTime(0.0001, now + starts[idx]);
-            overGain.gain.linearRampToValueAtTime(0.09, now + starts[idx] + 0.005);
-            overGain.gain.exponentialRampToValueAtTime(0.0001, now + starts[idx] + 0.14);
+            overGain.gain.setValueAtTime(0.0001, now + n.start);
+            overGain.gain.linearRampToValueAtTime(0.11, now + n.start + 0.003);
+            overGain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + 0.12);
 
             osc.connect(gain);
             overtone.connect(overGain);
             gain.connect(ctx.destination);
             overGain.connect(ctx.destination);
 
-            osc.start(now + starts[idx]);
-            osc.stop(now + stops[idx]);
-            overtone.start(now + starts[idx]);
-            overtone.stop(now + starts[idx] + 0.15);
+            osc.start(now + n.start);
+            osc.stop(now + n.stop);
+            overtone.start(now + n.start);
+            overtone.stop(now + n.start + 0.13);
         });
     } catch (e) {}
 }
 
 function playNotificationSound() {
     try {
-        const audio = initTruecallerAudioElement();
-        if (audio) {
-            audio.pause();
-            audio.currentTime = 0;
-            audio.volume = 0.92;
-            const playPromise = audio.play();
+        const wavUrl = buildTruecallerChimeWavUrl();
+        if (wavUrl && typeof Audio !== 'undefined') {
+            const freshAudio = new Audio(wavUrl);
+            freshAudio.volume = 0.96;
+            const playPromise = freshAudio.play();
             if (playPromise && typeof playPromise.catch === 'function') {
                 playPromise.catch(() => {
                     _playTruecallerWebAudioChime();
@@ -1645,35 +1642,100 @@ function generateReceiptAuthCode() {
 // ============================================
 const INDIAN_IFSC_PREFIX_MAP = {
     'SBIN': { bank: 'State Bank of India', branch: 'Main Branch' },
+    'SBBJ': { bank: 'State Bank of India', branch: 'Bikaner & Jaipur Circle' },
+    'SBLS': { bank: 'State Bank of India', branch: 'Hyderabad / Associate Circle' },
+    'STBP': { bank: 'State Bank of India', branch: 'Patiala Circle' },
     'HDFC': { bank: 'HDFC Bank', branch: 'Retail Operations Branch' },
     'ICIC': { bank: 'ICICI Bank', branch: 'Central Operations Branch' },
     'UTIB': { bank: 'Axis Bank', branch: 'Central Corporate Branch' },
     'PUNB': { bank: 'Punjab National Bank', branch: 'Main City Branch' },
+    'ORBC': { bank: 'Punjab National Bank', branch: 'OBC Circle Branch' },
+    'UTBI': { bank: 'Punjab National Bank', branch: 'United Circle Branch' },
     'BARB': { bank: 'Bank of Baroda', branch: 'Main Branch' },
+    'VIJB': { bank: 'Bank of Baroda', branch: 'Vijaya Circle Branch' },
+    'BKDN': { bank: 'Bank of Baroda', branch: 'Dena Circle Branch' },
     'KKBK': { bank: 'Kotak Mahindra Bank', branch: 'Commercial Branch' },
     'CNRB': { bank: 'Canara Bank', branch: 'Town Square Branch' },
+    'SYNB': { bank: 'Canara Bank', branch: 'Syndicate Circle Branch' },
     'UBIN': { bank: 'Union Bank of India', branch: 'Central Branch' },
+    'ANDB': { bank: 'Union Bank of India', branch: 'Andhra Circle Branch' },
+    'CORP': { bank: 'Union Bank of India', branch: 'Corporation Circle Branch' },
     'BKID': { bank: 'Bank of India', branch: 'Main Branch' },
     'IDIB': { bank: 'Indian Bank', branch: 'City Branch' },
+    'ALLA': { bank: 'Indian Bank', branch: 'Allahabad Circle Branch' },
     'CBIN': { bank: 'Central Bank of India', branch: 'Main Regional Branch' },
     'IOBA': { bank: 'Indian Overseas Bank', branch: 'City Branch' },
     'UCBA': { bank: 'UCO Bank', branch: 'Head Office Branch' },
     'MAHB': { bank: 'Bank of Maharashtra', branch: 'City Branch' },
     'PSIB': { bank: 'Punjab & Sind Bank', branch: 'Main Branch' },
     'IDFB': { bank: 'IDFC FIRST Bank', branch: 'Digital Operations Branch' },
+    'IBKL': { bank: 'IDBI Bank', branch: 'Central Operations Branch' },
     'YESB': { bank: 'YES Bank', branch: 'Corporate Headquarters' },
     'INDB': { bank: 'IndusInd Bank', branch: 'Metro Branch' },
     'FDRL': { bank: 'Federal Bank', branch: 'Commercial Branch' },
-    'AIRP': { bank: 'Airtel Payments Bank', branch: 'Digital Operations' },
-    'PYTM': { bank: 'Paytm Payments Bank', branch: 'Noida Center' },
-    'IPOS': { bank: 'India Post Payments Bank', branch: 'GPO New Delhi' },
+    'RATN': { bank: 'RBL Bank', branch: 'Retail Operations Branch' },
+    'RBLN': { bank: 'RBL Bank', branch: 'Operations Branch' },
+    'BDBL': { bank: 'Bandhan Bank', branch: 'Kolkata Main Branch' },
     'JAKA': { bank: 'Jammu & Kashmir Bank', branch: 'Srinagar Main Branch' },
     'CSBK': { bank: 'CSB Bank', branch: 'Main Branch' },
     'DCBL': { bank: 'DCB Bank', branch: 'Commercial Branch' },
     'KVBL': { bank: 'Karur Vysya Bank', branch: 'Central Branch' },
-    'RBLN': { bank: 'RBL Bank', branch: 'Operations Branch' },
     'SIBL': { bank: 'South Indian Bank', branch: 'City Branch' },
-    'BDBL': { bank: 'Bandhan Bank', branch: 'Kolkata Main Branch' }
+    'CIUB': { bank: 'City Union Bank', branch: 'Main Branch' },
+    'DLXB': { bank: 'Dhanlaxmi Bank', branch: 'Main Branch' },
+    'KARB': { bank: 'Karnataka Bank', branch: 'Head Office Branch' },
+    'LAVB': { bank: 'Lakshmi Vilas Bank (DBS)', branch: 'Main Branch' },
+    'TMBL': { bank: 'Tamilnad Mercantile Bank', branch: 'Main Branch' },
+    'NTBL': { bank: 'Nainital Bank', branch: 'Main Branch' },
+    'AUBL': { bank: 'AU Small Finance Bank', branch: 'Central Hub' },
+    'ESFB': { bank: 'Equitas Small Finance Bank', branch: 'Chennai Operations' },
+    'UJVN': { bank: 'Ujjivan Small Finance Bank', branch: 'Bengaluru Operations' },
+    'JSFB': { bank: 'Jana Small Finance Bank', branch: 'Central Branch' },
+    'SURY': { bank: 'Suryoday Small Finance Bank', branch: 'Navi Mumbai Hub' },
+    'UTKS': { bank: 'Utkarsh Small Finance Bank', branch: 'Varanasi Hub' },
+    'NESF': { bank: 'North East Small Finance Bank', branch: 'Guwahati Hub' },
+    'SHFB': { bank: 'Shivalik Small Finance Bank', branch: 'Noida Operations' },
+    'CAPB': { bank: 'Capital Small Finance Bank', branch: 'Jalandhar Main Branch' },
+    'ESMF': { bank: 'ESAF Small Finance Bank', branch: 'Thrissur Operations' },
+    'FSFB': { bank: 'Fincare Small Finance Bank', branch: 'Digital Operations' },
+    'AIRP': { bank: 'Airtel Payments Bank', branch: 'Digital Operations' },
+    'PYTM': { bank: 'Paytm Payments Bank', branch: 'Noida Center' },
+    'IPOS': { bank: 'India Post Payments Bank', branch: 'GPO New Delhi' },
+    'FINO': { bank: 'Fino Payments Bank', branch: 'Navi Mumbai Center' },
+    'JIOP': { bank: 'Jio Payments Bank', branch: 'Mumbai Operations' },
+    'NSPB': { bank: 'NSDL Payments Bank', branch: 'Mumbai Depository Hub' },
+    'CITI': { bank: 'Citibank India', branch: 'Mumbai Main Branch' },
+    'SCBL': { bank: 'Standard Chartered Bank', branch: 'Fort Mumbai Branch' },
+    'HSBC': { bank: 'HSBC Bank India', branch: 'Mumbai Operations' },
+    'DBSS': { bank: 'DBS Bank India', branch: 'Fort Mumbai Branch' },
+    'DEUT': { bank: 'Deutsche Bank India', branch: 'Mumbai Main Branch' },
+    'BARC': { bank: 'Barclays Bank India', branch: 'Mumbai Main Branch' },
+    'BNPA': { bank: 'BNP Paribas India', branch: 'Mumbai Branch' },
+    'BOFA': { bank: 'Bank of America India', branch: 'Mumbai Branch' },
+    'CHAS': { bank: 'JP Morgan Chase Bank', branch: 'Mumbai Branch' },
+    'SHBK': { bank: 'Shinhan Bank India', branch: 'Mumbai Branch' },
+    'ABHY': { bank: 'Abhyudaya Co-operative Bank', branch: 'Mumbai Main Branch' },
+    'COSB': { bank: 'Cosmos Co-operative Bank', branch: 'Pune Main Branch' },
+    'SRCB': { bank: 'Saraswat Co-operative Bank', branch: 'Mumbai Main Branch' },
+    'SVCB': { bank: 'SVC Co-operative Bank', branch: 'Mumbai Main Branch' },
+    'TJSB': { bank: 'TJSB Sahakari Bank', branch: 'Thane Main Branch' },
+    'NKGS': { bank: 'NKGSB Co-operative Bank', branch: 'Mumbai Branch' },
+    'DNSB': { bank: 'Dombivli Nagari Sahakari Bank', branch: 'Dombivli Branch' },
+    'GSCB': { bank: 'Gujarat State Co-operative Bank', branch: 'Ahmedabad Main' },
+    'MSCI': { bank: 'Maharashtra State Co-operative Bank', branch: 'Mumbai Main' },
+    'APBL': { bank: 'Andhra Pradesh State Co-op Bank', branch: 'Vijayawada Main' },
+    'KSCB': { bank: 'Karnataka State Co-operative Apex Bank', branch: 'Bengaluru Main' },
+    'KLGB': { bank: 'Kerala Gramin Bank', branch: 'Malappuram Main' },
+    'APGB': { bank: 'Andhra Pragathi Grameena Bank', branch: 'Kadapa Main' },
+    'APGV': { bank: 'Andhra Pradesh Grameena Vikas Bank', branch: 'Warangal Main' },
+    'ARYB': { bank: 'Aryavart Bank', branch: 'Lucknow Head Office' },
+    'BARB0BUPGBX': { bank: 'Baroda UP Bank', branch: 'Gorakhpur Main' },
+    'PKGB': { bank: 'Karnataka Gramin Bank', branch: 'Ballari Main' },
+    'RMGB': { bank: 'Rajasthan Marudhara Gramin Bank', branch: 'Jodhpur Main' },
+    'BRKG': { bank: 'Baroda Rajasthan Kshetriya Gramin Bank', branch: 'Ajmer Main' },
+    'MAHG': { bank: 'Maharashtra Gramin Bank', branch: 'Aurangabad Main' },
+    'PUNB0PGBX': { bank: 'Punjab Gramin Bank', branch: 'Kapurthala Main' },
+    'RBIS': { bank: 'Reserve Bank of India', branch: 'Central Office' }
 };
 
 async function lookupIfscDetails(rawIfsc) {
@@ -1682,13 +1744,13 @@ async function lookupIfscDetails(rawIfsc) {
     if (cleanIfsc.length < 4) return null;
 
     const prefix = cleanIfsc.slice(0, 4);
-    const localMatch = INDIAN_IFSC_PREFIX_MAP[prefix];
+    const localMatch = INDIAN_IFSC_PREFIX_MAP[cleanIfsc] || INDIAN_IFSC_PREFIX_MAP[prefix];
 
-    // Attempt live Razorpay IFSC API lookup if length == 11
+    // Attempt live IFSC API lookups when full 11-char IFSC is entered
     if (cleanIfsc.length === 11) {
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 1600);
+            const timeoutId = setTimeout(() => controller.abort(), 4500);
             const res = await fetch(`https://ifsc.razorpay.com/${cleanIfsc}`, { signal: controller.signal });
             clearTimeout(timeoutId);
             if (res.ok) {
@@ -1704,7 +1766,31 @@ async function lookupIfscDetails(rawIfsc) {
                 }
             }
         } catch (e) {
-            // Network fallback to local dictionary
+            // Try secondary public IFSC API fallback
+        }
+
+        try {
+            const controller2 = new AbortController();
+            const timeoutId2 = setTimeout(() => controller2.abort(), 2500);
+            const res2 = await fetch(`https://bank-apis.justinclicks.com/API/V1/IFSC/${cleanIfsc}/`, { signal: controller2.signal });
+            clearTimeout(timeoutId2);
+            if (res2.ok) {
+                const data2 = await res2.json();
+                if (data2 && (data2.BANK || data2.bank)) {
+                    const bankNm = data2.BANK || data2.bank;
+                    const branchNm = data2.BRANCH || data2.branch || 'Main Branch';
+                    const cityNm = data2.CITY || data2.city || '';
+                    return {
+                        bankName: bankNm,
+                        branch: `${branchNm}${cityNm ? ` • ${cityNm}` : ''}`,
+                        ifsc: cleanIfsc,
+                        verified: true,
+                        brand: getBankBrandInfo(bankNm)
+                    };
+                }
+            }
+        } catch (e) {
+            // Fall through to local dictionary / pattern fallback
         }
     }
 
@@ -1718,12 +1804,12 @@ async function lookupIfscDetails(rawIfsc) {
         };
     }
 
-    // Generic Indian Bank fallback if valid IFSC pattern
+    // Generic Indian Bank fallback for any valid 11-char RBI IFSC pattern
     if (/^[A-Z]{4}0[A-Z0-9]{6}$/.test(cleanIfsc)) {
         const generatedBank = `${prefix} Bank of India`;
         return {
             bankName: generatedBank,
-            branch: 'Central Operations • Verified',
+            branch: 'Branch Code Verified • RBI IFSC Network',
             ifsc: cleanIfsc,
             verified: true,
             brand: getBankBrandInfo(generatedBank)
@@ -1765,11 +1851,11 @@ function showPaymentNotification(transaction) {
     const accountDetails = StorageManager.getAccountDetails(currentUsername) || {};
     // Priority: transaction.bankName -> transaction.accountName -> accountDetails.bankName
     const bankName = transaction.bankName || transaction.accountName || accountDetails.bankName || 'State Bank of India';
-    const balanceKey = `balance_${currentUsername}`;
-    const liveBal = parseFloat(localStorage.getItem(balanceKey)) || notificationAmount;
 
-    const formattedAmount = Number(notificationAmount).toLocaleString('en-IN');
-    const formattedBalance = Number(liveBal).toLocaleString('en-IN');
+    const formattedAmount = Number(notificationAmount).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
     const maskedAcc = maskAccountNumber(notificationAccount);
     const last4 = maskedAcc.slice(-4);
     const smsDateTime = formatSmsDateTime(notificationTime);
@@ -1777,7 +1863,12 @@ function showPaymentNotification(transaction) {
     // Get authentic bank brand info (logo, sender code, display name)
     const brand = getBankBrandInfo(bankName);
     const senderCode = getRealisticSenderCode(brand.shortCode);
-    const refUtr = `${Math.floor(100000000000 + Math.random() * 900000000000)}`;
+    const refUtr = transaction.utrRef
+        ? String(transaction.utrRef).replace(/\s+/g, '')
+        : `${Math.floor(100000000000 + Math.random() * 900000000000)}`;
+    const smsHeadline = transaction.isCommissionPayout
+        ? 'Commission Payout Credited'
+        : 'Amount Credited to A/c';
 
     // Log broadcast in Admin backend
     StorageManager.logSmsNotification({
@@ -1819,104 +1910,69 @@ function showPaymentNotification(transaction) {
         container.appendChild(notifCard);
     }
 
-    // Realistic Truecaller Smart SMS Banking alert markup with official bank identity
+    // 100% Authentic Android Truecaller Smart SMS Banking Notification (No Available Balance shown)
     notifCard.innerHTML = `
-        <!-- Top App Bar with Truecaller Official Style Branding -->
         <div class="tc-notif-header">
             <div class="tc-notif-app-info">
-                <div class="tc-app-icon" aria-hidden="true" title="Truecaller Smart SMS">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <span class="tc-app-icon" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect width="24" height="24" rx="6" fill="#0087FF"/>
                         <path d="M7.4 6.5C7.0 6.5 6.6 6.7 6.3 7.0C5.6 7.7 5.2 8.7 5.2 9.8C5.2 13.5 8.2 16.5 11.9 16.5C13.0 16.5 14.0 16.1 14.7 15.4C15.0 15.1 15.2 14.7 15.2 14.3C15.2 13.9 14.9 13.6 14.6 13.4L12.7 12.3C12.4 12.1 12.0 12.1 11.7 12.3L10.9 13.0C10.8 13.1 10.6 13.1 10.4 13.0C9.6 12.5 8.9 11.8 8.4 11.0C8.3 10.8 8.3 10.6 8.4 10.5L9.1 9.7C9.3 9.4 9.3 9.0 9.1 8.7L8.0 6.8C7.8 6.5 7.5 6.5 7.4 6.5Z" fill="white"/>
                     </svg>
-                </div>
-                <div class="tc-app-meta">
-                    <div class="tc-app-name-row">
-                        <span class="tc-app-name">TRUECALLER</span>
-                        <span class="tc-verified-badge" title="Verified Truecaller SMS">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <circle cx="12" cy="12" r="10" fill="#0087FF"/>
-                                <path d="M7.5 12L10.5 15L16.5 9" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            Verified
-                        </span>
-                        <span class="tc-dot-separator">•</span>
-                        <span class="tc-header-time">now</span>
-                    </div>
-                </div>
+                </span>
+                <span class="tc-app-name">Truecaller</span>
+                <span class="tc-dot-separator">•</span>
+                <span class="tc-smart-sms-pill">Smart SMS</span>
+                <span class="tc-dot-separator">•</span>
+                <span class="tc-header-time">now</span>
             </div>
             <button type="button" class="tc-close-btn" id="tcCloseBtn" aria-label="Dismiss notification">&times;</button>
         </div>
 
-        <!-- Bank Sender ID Header Row (Like Real Android SMS Notification) -->
         <div class="tc-bank-sender-row">
-            <div class="tc-bank-logo-wrap" style="box-shadow: 0 2px 10px ${brand.color}40;">
-                <img src="${brand.logoUrl}" alt="${brand.bankName} logo" class="tc-bank-logo-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
+            <div class="tc-bank-logo-wrap">
+                <img src="${brand.logoUrl}" alt="${brand.bankName}" class="tc-bank-logo-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
                 <div class="tc-bank-logo-svg-fallback" style="display:none;">${brand.logoSvg}</div>
+                <span class="tc-verified-corner" title="Verified Bank">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="11" fill="#0087FF" stroke="#FFFFFF" stroke-width="2"/>
+                        <path d="M7.5 12.2L10.5 15.2L16.5 9.2" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
             </div>
             <div class="tc-bank-sender-info">
                 <div class="tc-bank-name-line">
                     <span class="tc-bank-title">${brand.bankName}</span>
                     <span class="tc-sender-badge">${senderCode}</span>
                 </div>
-                <span class="tc-bank-subtext">Official Banking Alert • SMS</span>
+                <span class="tc-bank-subtext">${smsHeadline}</span>
             </div>
-            <div class="tc-smart-tag">
-                <span>SMART SMS</span>
+            <div class="tc-credit-amount-badge">
+                <span class="tc-amount-val">+ ₹${formattedAmount}</span>
             </div>
         </div>
 
-        <!-- Smart Transaction Card Body -->
         <div class="tc-smart-bubble">
-            <div class="tc-amount-headline">
-                <div class="tc-credit-tag">
-                    <span class="tc-credit-dot"></span>
-                    <span>CREDITED</span>
-                </div>
-                <div class="tc-amount-val">+₹${formattedAmount}</div>
-            </div>
-
-            <!-- Authentic 100% Real Bank SMS Message Body -->
             <div class="tc-sms-body">
-                Dear Customer, Your A/C <strong>${maskedAcc}</strong> is <strong>credited</strong> by <strong>₹${formattedAmount}</strong> on <strong>${smsDateTime}</strong> by UPI/IMPS transfer. Ref/UTR: <span class="tc-utr-code">${refUtr}</span>. Avail Bal: ₹${formattedBalance}. -${brand.bankName}
+                Dear Customer, your A/c <strong>XX${last4}</strong> is credited with <strong>INR ${formattedAmount}</strong> on ${smsDateTime} via IMPS Ref No <span class="tc-utr-code">${refUtr}</span>. -${brand.shortCode}
             </div>
 
-            <!-- Key Metric Chips (Account & Ref) -->
-            <div class="tc-details-grid">
+            <div class="tc-details-grid tc-details-grid-2">
                 <div class="tc-detail-col">
-                    <span class="tc-detail-lbl">Account</span>
-                    <span class="tc-detail-val">•••• ${last4}</span>
+                    <span class="tc-detail-lbl">Credited Account</span>
+                    <span class="tc-detail-val">${brand.shortCode} ••${last4}</span>
                 </div>
                 <div class="tc-detail-col">
-                    <span class="tc-detail-lbl">Reference / UTR</span>
-                    <span class="tc-detail-val">${refUtr.slice(0, 8)}...</span>
-                </div>
-                <div class="tc-detail-col">
-                    <span class="tc-detail-lbl">Avail Bal</span>
-                    <span class="tc-detail-val tc-bal-val">₹${formattedBalance}</span>
+                    <span class="tc-detail-lbl">IMPS / UTR Ref</span>
+                    <span class="tc-detail-val">${refUtr}</span>
                 </div>
             </div>
         </div>
 
-        <!-- Realistic Android Quick Actions (Truecaller SMS style) -->
         <div class="tc-quick-actions">
-            <button type="button" class="tc-action-btn tc-action-primary" id="tcViewDetailsBtn">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                </svg>
-                <span>View Details</span>
-            </button>
-            <button type="button" class="tc-action-btn" id="tcCopyUtrBtn">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-                <span>Copy UTR</span>
-            </button>
-            <button type="button" class="tc-action-btn" id="tcDismissBtn">
-                <span>Dismiss</span>
-            </button>
+            <button type="button" class="tc-action-btn tc-action-primary" id="tcViewDetailsBtn">View SMS</button>
+            <button type="button" class="tc-action-btn" id="tcCopyUtrBtn">Copy Ref</button>
+            <button type="button" class="tc-action-btn" id="tcDismissBtn">Mark as read</button>
         </div>
     `;
 
@@ -1946,16 +2002,9 @@ function showPaymentNotification(transaction) {
                     await navigator.clipboard.writeText(refUtr);
                 }
             } catch (err) {}
-            copyUtrBtn.innerHTML = `<span>✓ Copied</span>`;
+            copyUtrBtn.textContent = '✓ Copied';
             setTimeout(() => {
-                if (copyUtrBtn) {
-                    copyUtrBtn.innerHTML = `
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                        <span>Copy UTR</span>`;
-                }
+                if (copyUtrBtn) copyUtrBtn.textContent = 'Copy Ref';
             }, 1800);
         });
     }
@@ -1964,7 +2013,6 @@ function showPaymentNotification(transaction) {
     if (viewDetailsBtn) {
         viewDetailsBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            // Scroll to recent credits feed
             const txFeed = document.getElementById('transactionFeed') || document.getElementById('runningAccountSection');
             if (txFeed) {
                 txFeed.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1975,23 +2023,23 @@ function showPaymentNotification(transaction) {
 
     // Trigger enter animation: slide down from top
     notifCard.classList.remove('tc-notif-hiding');
-    void notifCard.offsetWidth; // Force layout reflow
+    void notifCard.offsetWidth;
     notifCard.classList.add('tc-notif-visible');
     notifCard.classList.add('tc-pulse');
     setTimeout(() => notifCard.classList.remove('tc-pulse'), 320);
 
-    // Play authentic device incoming payment SMS notification chime & haptic vibration
+    // Play authentic Truecaller notification chime & haptic vibration
     playNotificationSound();
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
         try {
-            navigator.vibrate([100, 60, 140]);
+            navigator.vibrate([80, 50, 110]);
         } catch (e) {}
     }
 
-    // Keep visible for ~6 seconds so user can comfortably read real SMS, then smoothly slide out
+    // Keep visible for ~6.5 seconds so user can comfortably read real SMS, then smoothly slide out
     currentNotificationTimeout = setTimeout(() => {
         dismissPaymentNotification();
-    }, 6000);
+    }, 6500);
 }
 
 function dismissPaymentNotification() {
@@ -2104,77 +2152,19 @@ function setupCopyButton(button, upiId, messageElement) {
     });
 }
 
-const BONUS_EXPIRY_DATE = new Date(2026, 8, 30, 23, 59, 0);
-let bonusCountdownTimer = null;
-
-function isBonusExpired() {
-    return Date.now() >= BONUS_EXPIRY_DATE.getTime();
-}
-
-function initializeBonusCountdown() {
-    const expiryText = document.getElementById('bonusCountdownExpiry');
-    const hoursEl = document.getElementById('bonusHours');
-    const minutesEl = document.getElementById('bonusMinutes');
-    const secondsEl = document.getElementById('bonusSeconds');
-
-    if (!expiryText || !hoursEl || !minutesEl || !secondsEl) return;
-
-    const targetTime = BONUS_EXPIRY_DATE;
-
-    function updateCountdown() {
-        const remainingMs = targetTime.getTime() - Date.now();
-
-        if (remainingMs <= 0) {
-            expiryText.textContent = 'BONUS EXPIRED';
-            hoursEl.textContent = '00';
-            minutesEl.textContent = '00';
-            secondsEl.textContent = '00';
-            clearInterval(bonusCountdownTimer);
-            bonusCountdownTimer = null;
-            return;
-        }
-
-        const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-
-        expiryText.textContent = 'Bonus will expire on: 30-09-2026 11:59 PM';
-        hoursEl.textContent = String(hours).padStart(2, '0');
-        minutesEl.textContent = String(minutes).padStart(2, '0');
-        secondsEl.textContent = String(seconds).padStart(2, '0');
-    }
-
-    clearInterval(bonusCountdownTimer);
-
-    if (isBonusExpired()) {
-        expiryText.textContent = 'BONUS EXPIRED';
-        hoursEl.textContent = '00';
-        minutesEl.textContent = '00';
-        secondsEl.textContent = '00';
-        return;
-    }
-
-    updateCountdown();
-    bonusCountdownTimer = setInterval(updateCountdown, 1000);
-}
-
 const workflowSectionIds = [
     'mainDashboard',
     'gamingFundSection',
     'autodebitSection',
     'activationPaymentSection',
     'activationCodeUpiSection',
-    'activationCodeDisplaySection',
-    'codeVerificationSection',
     'runningAccountSection',
     'withdrawCommissionSection',
+    'upgradePaymentSection',
     'paymentReceiptSection',
-    'bonusPageSection',
-    'bonusWithdrawSection'
+    'transactionHistorySection'
 ];
 const workflowHistory = [];
-let bonusPopupTimer = null;
 
 function showAppToast(message, variant = 'info') {
     const existing = document.getElementById('appInlineToast');
@@ -2228,18 +2218,6 @@ function showAppConfirm({ title = 'Confirm Action', message = '', okText = 'Proc
     }
 }
 
-function getBonusStorageKey(key, username) {
-    return `${key}_${username || 'default'}`;
-}
-
-function isBonusClaimed(username) {
-    return localStorage.getItem(getBonusStorageKey('bonusClaimed', username)) === '1';
-}
-
-function setBonusState(username, key, value) {
-    localStorage.setItem(getBonusStorageKey(key, username), value ? '1' : '0');
-}
-
 function getCurrentWorkflowSectionId() {
     return workflowSectionIds.find(id => {
         const el = document.getElementById(id);
@@ -2261,27 +2239,44 @@ function showWorkflowSection(sectionId, pushHistory = true) {
         }
     });
 
+    // Show Recent Ledger only on Home and standalone Ledger tab (NOT on Withdraw / Commission Payout page)
     const transactionHistorySection = document.getElementById('transactionHistorySection');
     if (transactionHistorySection) {
-        const shouldHideTxHistory = sectionId === 'bonusPageSection' || sectionId === 'bonusWithdrawSection' || sectionId === 'paymentReceiptSection';
-        transactionHistorySection.classList.toggle('hidden', shouldHideTxHistory);
+        const showLedger = sectionId === 'mainDashboard' || sectionId === 'transactionHistorySection';
+        transactionHistorySection.classList.toggle('hidden', !showLedger);
+    }
+
+    const bottomActions = document.querySelector('.bottom-actions');
+    if (bottomActions) {
+        bottomActions.classList.toggle('hidden', sectionId !== 'mainDashboard');
+    }
+
+    const bannerEl = document.getElementById('panelApprovalBanner');
+    if (bannerEl && sectionId !== 'mainDashboard' && sectionId !== 'runningAccountSection') {
+        bannerEl.classList.add('hidden');
     }
 
     const backBtn = document.getElementById('dashboardBackBtn');
     if (backBtn) {
-        backBtn.style.display = 'inline-flex';
+        backBtn.style.display = sectionId === 'mainDashboard' ? 'none' : 'inline-flex';
     }
 
     if (typeof window.__onWorkflowSectionShown === 'function') {
         window.__onWorkflowSectionShown(sectionId);
     }
+
+    try {
+        window.scrollTo({ top: 0, behavior: 'auto' });
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+    } catch {}
 }
 
 function goBackOneStep() {
     const currentSectionId = getCurrentWorkflowSectionId();
     const previousSectionId = workflowHistory.pop();
 
-    if (previousSectionId) {
+    if (previousSectionId && previousSectionId !== currentSectionId) {
         showWorkflowSection(previousSectionId, false);
         return;
     }
@@ -2289,139 +2284,6 @@ function goBackOneStep() {
     if (currentSectionId && currentSectionId !== 'mainDashboard') {
         showWorkflowSection('mainDashboard', false);
         return;
-    }
-}
-
-function updateBonusBadgeUI(username = StorageManager.getLoggedInUser()) {
-    const bonusBadge = document.getElementById('bonusBadge');
-    const bonusBox = document.getElementById('bonusBox');
-    const bonusOpened = localStorage.getItem(getBonusStorageKey('bonusOpened', username)) === '1';
-
-    if (bonusBox) bonusBox.style.display = 'inline-flex';
-    if (bonusBadge) bonusBadge.style.display = bonusOpened ? 'none' : 'inline-flex';
-}
-
-function showBonusInlineMessage(message, type = 'error', timeoutMs = 7000) {
-    const messageContainer = document.getElementById('bonusMessageContainer');
-    if (!messageContainer) return;
-
-    messageContainer.style.display = 'block';
-    messageContainer.textContent = message;
-    messageContainer.className = `bonus-inline-message ${type}`;
-
-    clearTimeout(bonusPopupTimer);
-    bonusPopupTimer = setTimeout(() => {
-        messageContainer.style.display = 'none';
-        messageContainer.textContent = '';
-        messageContainer.className = 'bonus-inline-message';
-    }, timeoutMs);
-}
-
-function renderBonusPageUI(username = StorageManager.getLoggedInUser()) {
-    const bonusSection = document.getElementById('bonusPageSection');
-    const title = bonusSection ? bonusSection.querySelector('h3') : null;
-    const subtitle = bonusSection ? bonusSection.querySelector('.bonus-page-subtitle') : null;
-    const amount = bonusSection ? bonusSection.querySelector('.bonus-amount') : null;
-    const claimButton = bonusSection ? bonusSection.querySelector('#claimBonusBtn') : null;
-    const messageContainer = document.getElementById('bonusMessageContainer');
-
-    if (!bonusSection) return;
-
-    if (isBonusClaimed(username)) {
-        if (title) title.textContent = '✅ CONGRATULATIONS';
-        if (subtitle) subtitle.textContent = 'YOU HAVE SUCCESSFULLY CLAIMED YOUR BONUS.';
-        if (amount) {
-            amount.textContent = '';
-            amount.style.display = 'none';
-        }
-        if (claimButton) {
-            claimButton.textContent = 'BONUS CLAIMED';
-            claimButton.disabled = true;
-            claimButton.classList.remove('btn-primary');
-            claimButton.classList.add('btn-secondary');
-        }
-        if (messageContainer) {
-            messageContainer.style.display = 'none';
-            messageContainer.textContent = '';
-            messageContainer.className = 'bonus-inline-message';
-        }
-        return;
-    }
-
-    if (title) title.textContent = 'CONGRATULATIONS';
-    if (subtitle) subtitle.textContent = 'SPECIAL BONUS CREDITED';
-    if (amount) {
-        amount.textContent = '₹799';
-        amount.style.display = 'block';
-    }
-    if (claimButton) {
-        if (isBonusExpired()) {
-            claimButton.textContent = 'BONUS EXPIRED';
-            claimButton.disabled = true;
-            claimButton.classList.remove('btn-primary');
-            claimButton.classList.add('btn-secondary');
-        } else {
-            claimButton.textContent = 'CLAIM / WITHDRAW ₹799';
-            claimButton.disabled = false;
-            claimButton.classList.remove('btn-secondary');
-            claimButton.classList.add('btn-primary');
-        }
-    }
-    if (messageContainer) {
-        messageContainer.style.display = 'none';
-        messageContainer.textContent = '';
-        messageContainer.className = 'bonus-inline-message';
-    }
-
-    initializeBonusCountdown();
-}
-
-function showBonusReceipt(amount, ifsc, bank, holder, username = StorageManager.getLoggedInUser()) {
-    const form = document.getElementById('bonusWithdrawForm');
-    const formParent = form ? form.parentElement : null;
-    const existing = formParent ? formParent.querySelector('.final-receipt') : null;
-    if (existing) existing.remove();
-
-    const receiptDiv = document.createElement('div');
-    receiptDiv.className = 'final-receipt';
-    const timestamp = new Date().toLocaleString();
-    receiptDiv.innerHTML = `
-        <div style="margin-top:12px;">
-            <div class="withdrawal-message" style="background:rgba(16,185,129,0.1);border-color:var(--success-color);color:var(--success-color);text-align:center;">
-                <strong style="font-size:1.1rem;">✔ WITHDRAW REQUEST SUCCESSFULLY RECEIVED</strong>
-            </div>
-
-            <div class="receipt-panel" style="margin-top:12px;">
-                <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Withdrawal Amount:</span><strong>₹${Number(amount).toLocaleString('en-IN')}</strong></div>
-                <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Bank:</span><strong>${bank}</strong></div>
-                <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>IFSC:</span><strong>${ifsc}</strong></div>
-                <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Credited To:</span><strong>${holder}</strong></div>
-                <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Mode:</span><strong>IMPS transfer</strong></div>
-                <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Status:</span><small style="color:var(--success-color);font-weight:700;">Successfully Credited</small></div>
-                <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Timestamp:</span><small>${timestamp}</small></div>
-            </div>
-
-            <button type="button" class="btn btn-primary" id="closeBonusReceiptBtn" style="width:100%;margin-top:12px;">Close & Return to Dashboard</button>
-        </div>
-    `;
-
-    if (formParent) {
-        formParent.innerHTML = '';
-        formParent.appendChild(receiptDiv);
-    }
-
-    const closeBtn = document.getElementById('closeBonusReceiptBtn');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-            const bonusWithdrawSection = document.getElementById('bonusWithdrawSection');
-            const mainDashboard = document.getElementById('mainDashboard');
-            const transactionHistorySection = document.getElementById('transactionHistorySection');
-            if (bonusWithdrawSection) bonusWithdrawSection.classList.add('hidden');
-            if (mainDashboard) mainDashboard.classList.remove('hidden');
-            if (transactionHistorySection) transactionHistorySection.classList.remove('hidden');
-            if (formParent) formParent.innerHTML = '';
-            renderBonusPageUI(username);
-        });
     }
 }
 
@@ -2445,6 +2307,19 @@ if (document.getElementById('registerForm')) {
             button.classList.add('active');
             const tabEl = document.getElementById(tabName + 'Tab');
             if (tabEl) tabEl.classList.add('active');
+        });
+    });
+
+    // Toggle MPIN / Password visibility via eye icon buttons
+    document.querySelectorAll('.mp-pwd-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-pwd-target');
+            const inputEl = targetId ? document.getElementById(targetId) : null;
+            if (!inputEl) return;
+            const isHidden = inputEl.type === 'password';
+            inputEl.type = isHidden ? 'text' : 'password';
+            btn.classList.toggle('is-visible', isHidden);
+            btn.setAttribute('aria-pressed', isHidden ? 'true' : 'false');
         });
     });
 
@@ -2604,8 +2479,8 @@ if (document.getElementById('registerForm')) {
             }
         }
 
-        // Block only if number is explicitly already registered or invalid format
-        if (result && !result.success && /already registered|valid 10-digit/i.test(result.message || '')) {
+        // Block only if invalid 10-digit Indian mobile format
+        if (result && !result.success && /valid 10-digit/i.test(result.message || '')) {
             const errMsg = result.message;
             if (otpModalOverlay && otpModalOverlay.style.display === 'flex' && otpModalMessage) {
                 otpModalMessage.textContent = errMsg;
@@ -2668,7 +2543,7 @@ if (document.getElementById('registerForm')) {
             const remainingSec = Math.max(1, Math.ceil((deliveryDelayMs - elapsed) / 1000));
             const pct = Math.min(96, Math.max(6, Math.round((elapsed / deliveryDelayMs) * 100)));
             if (otpDeliveryCountdownText) {
-                otpDeliveryCountdownText.textContent = `Delivering verification code in ${remainingSec}s...`;
+                otpDeliveryCountdownText.textContent = `Connecting to Pannel in ${remainingSec}s...`;
             }
             if (otpDeliveryProgressFill) {
                 otpDeliveryProgressFill.style.width = `${pct}%`;
@@ -2937,13 +2812,20 @@ if (document.getElementById('registerForm')) {
             verifiedOtpProof = null;
             if (mobileVerifiedNotice) mobileVerifiedNotice.style.display = 'none';
 
+            let postRegisterNoticeTimer = null;
             setTimeout(() => {
                 tabButtons.forEach(btn => btn.classList.toggle('active', btn.getAttribute('data-tab') === 'login'));
                 tabContents.forEach(content => content.classList.toggle('active', content.id === 'loginTab'));
 
                 const postNotice = document.getElementById('postRegisterNotice');
                 const postNoticeText = document.getElementById('postRegisterNoticeText');
-                if (postNotice) postNotice.style.display = 'flex';
+                if (postNotice) {
+                    postNotice.style.display = 'flex';
+                    clearTimeout(postRegisterNoticeTimer);
+                    postRegisterNoticeTimer = setTimeout(() => {
+                        postNotice.style.display = 'none';
+                    }, 5000);
+                }
                 if (postNoticeText) {
                     postNoticeText.textContent = `Account @${username} (+91 ${mobile}) registered! Enter your registered mobile number or username and password to login.`;
                 }
@@ -3079,6 +2961,14 @@ if (document.getElementById('welcomeMessage')) {
         return (utrs || []).find(u => isUpgrade199Record(u) && isUtrApproved(u)) || null;
     }
 
+    let pendingWithdrawRequest = null;
+    const selectedUpiByFlow = {
+        activation: DEMO_UPI_ID_1,
+        upgrade: DEMO_UPI_ID_1
+    };
+    let approvedBannerTimer = null;
+    let approvedBannerDismissed = false;
+
     function openPayChargesFlow(preferUpgrade = false) {
         const users = JSON.parse(localStorage.getItem('users') || '{}');
         const userObj = users[loggedInUser] || {};
@@ -3088,14 +2978,20 @@ if (document.getElementById('welcomeMessage')) {
             return;
         }
         if (preferUpgrade) {
-            showWorkflowSection('withdrawCommissionSection');
-            const form = document.getElementById('withdrawCommissionForm');
-            if (form) form.style.display = 'block';
-            const backBtn = document.getElementById('backFromWithdrawBtn');
-            if (backBtn) backBtn.style.display = 'block';
-            const parent = form ? form.parentElement : null;
-            const existingUpgrade = parent ? parent.querySelector('.upgrade-panel') : null;
-            if (existingUpgrade) existingUpgrade.remove();
+            pendingWithdrawRequest = pendingWithdrawRequest || {
+                accNumber: accDetails.accountNumber || '',
+                ifsc: accDetails.ifscCode || '',
+                bank: accDetails.bankName || '',
+                contact: accDetails.contactNumber || userObj.mobile || ''
+            };
+            const uInput = document.getElementById('upgradeUtrInput');
+            if (uInput) uInput.value = '';
+            const uMsg = document.getElementById('upgradeUtrMessage');
+            if (uMsg) {
+                uMsg.textContent = '';
+                uMsg.className = 'message';
+            }
+            showWorkflowSection('upgradePaymentSection');
             return;
         }
         showWorkflowSection('activationCodeUpiSection');
@@ -3106,6 +3002,42 @@ if (document.getElementById('welcomeMessage')) {
         }
         const msgDiv = document.getElementById('activationUtrMessage');
         if (msgDiv) msgDiv.textContent = '';
+    }
+
+    function openUpiAppPayment(appKey, flow) {
+        const isUpgrade = flow === 'upgrade';
+        const upiId = selectedUpiByFlow[flow] || DEMO_UPI_ID_1;
+        const amount = isUpgrade ? '199' : '999';
+        const note = isUpgrade
+            ? 'Mahadev Pannel Clearing Charge Rs 199'
+            : 'Mahadev Pannel One Time Activation Rs 999';
+        const tr = `MP${Date.now()}`;
+        const params = `pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent('Mahadev Pannel')}&am=${amount}&cu=INR&tn=${encodeURIComponent(note)}&tr=${encodeURIComponent(tr)}`;
+
+        let targetUrl = `upi://pay?${params}`;
+        let appLabel = 'UPI App';
+        if (appKey === 'phonepe') {
+            targetUrl = `phonepe://pay?${params}`;
+            appLabel = 'PhonePe';
+        } else if (appKey === 'gpay') {
+            targetUrl = `tez://upi/pay?${params}`;
+            appLabel = 'Google Pay';
+        } else if (appKey === 'paytm') {
+            targetUrl = `paytmmp://pay?${params}`;
+            appLabel = 'Paytm';
+        }
+
+        showAppToast(`Opening ${appLabel} for ₹${amount} (${upiId})...`, 'info');
+        try {
+            const link = document.createElement('a');
+            link.href = targetUrl;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        } catch {
+            window.location.href = targetUrl;
+        }
     }
 
     function formatClockStamp(isoString) {
@@ -3125,27 +3057,143 @@ if (document.getElementById('welcomeMessage')) {
         }
     }
 
+    function buildReceiptQrSvg(seedText) {
+        const size = 25;
+        let hash = 2166136261;
+        const str = String(seedText || 'MAHADEV-IMPS-VERIFIED');
+        for (let i = 0; i < str.length; i++) {
+            hash ^= str.charCodeAt(i);
+            hash = Math.imul(hash, 16777619) >>> 0;
+        }
+        const nextBit = () => {
+            hash ^= hash << 13;
+            hash ^= hash >>> 17;
+            hash ^= hash << 5;
+            hash = hash >>> 0;
+            return (hash & 1) === 1;
+        };
+
+        const grid = Array.from({ length: size }, () => Array(size).fill(null));
+        const setFinder = (r0, c0) => {
+            for (let r = -1; r <= 7; r++) {
+                for (let c = -1; c <= 7; c++) {
+                    const rr = r0 + r;
+                    const cc = c0 + c;
+                    if (rr < 0 || rr >= size || cc < 0 || cc >= size) continue;
+                    if (r === -1 || r === 7 || c === -1 || c === 7) {
+                        grid[rr][cc] = false;
+                    } else if (r === 0 || r === 6 || c === 0 || c === 6) {
+                        grid[rr][cc] = true;
+                    } else if (r >= 2 && r <= 4 && c >= 2 && c <= 4) {
+                        grid[rr][cc] = true;
+                    } else {
+                        grid[rr][cc] = false;
+                    }
+                }
+            }
+        };
+
+        setFinder(0, 0);
+        setFinder(0, size - 7);
+        setFinder(size - 7, 0);
+
+        for (let r = -2; r <= 2; r++) {
+            for (let c = -2; c <= 2; c++) {
+                const rr = 18 + r;
+                const cc = 18 + c;
+                const isBorder = Math.abs(r) === 2 || Math.abs(c) === 2;
+                const isCenter = r === 0 && c === 0;
+                grid[rr][cc] = isBorder || isCenter;
+            }
+        }
+
+        for (let i = 8; i < size - 8; i++) {
+            if (grid[6][i] === null) grid[6][i] = i % 2 === 0;
+            if (grid[i][6] === null) grid[i][6] = i % 2 === 0;
+        }
+        grid[size - 8][8] = true;
+
+        for (let r = 0; r < size; r++) {
+            for (let c = 0; c < size; c++) {
+                if (grid[r][c] === null) {
+                    grid[r][c] = nextBit();
+                }
+            }
+        }
+
+        let rects = '';
+        for (let r = 0; r < size; r++) {
+            for (let c = 0; c < size; c++) {
+                if (grid[r][c]) {
+                    rects += `<rect x="${c + 2}" y="${r + 2}" width="1" height="1" fill="#0F172A"/>`;
+                }
+            }
+        }
+
+        return `<svg viewBox="0 0 ${size + 4} ${size + 4}" width="112" height="112" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NPCI Verified Settlement QR"><rect width="${size + 4}" height="${size + 4}" rx="2" fill="#FFFFFF"/>${rects}</svg>`;
+    }
+
+    function resolveWithdrawPayoutDetails(utrRecord, userObj) {
+        const accDetails = (userObj && userObj.accountDetails) || StorageManager.getAccountDetails(loggedInUser) || {};
+        let savedWithdraw = null;
+        try {
+            savedWithdraw = JSON.parse(localStorage.getItem(`withdraw_payout_details_${loggedInUser}`) || 'null');
+        } catch {}
+
+        const utrVal = (utrRecord && (utrRecord.utr || utrRecord.tokenNumber)) || 'VERIFIED-UTR';
+        const savedUpgradeComm = parseFloat(localStorage.getItem(`upgrade_comm_${utrVal}`) || '');
+        const typeMatch = String(utrRecord?.type || '').match(/Payout\s*₹\s*([\d,]+(?:\.\d+)?)/i);
+        const typeComm = typeMatch ? parseFloat(typeMatch[1].replace(/,/g, '')) : NaN;
+        const savedWithdrawComm = parseFloat(savedWithdraw?.commission || '');
+        const lastUpgradeComm = parseFloat(localStorage.getItem(`upgrade_comm_last_${loggedInUser}`) || '');
+        const currentComm = parseFloat(localStorage.getItem(`commission_${loggedInUser}`) || '') || Number(userObj?.commission || 0);
+
+        const payoutAmount = (!isNaN(savedUpgradeComm) && savedUpgradeComm > 0)
+            ? savedUpgradeComm
+            : ((!isNaN(typeComm) && typeComm > 0)
+                ? typeComm
+                : ((!isNaN(savedWithdrawComm) && savedWithdrawComm > 0)
+                    ? savedWithdrawComm
+                    : ((!isNaN(lastUpgradeComm) && lastUpgradeComm > 0) ? lastUpgradeComm : currentComm)));
+
+        const bankName = (utrRecord && utrRecord.bank) || (savedWithdraw && savedWithdraw.bank) || accDetails.bankName || 'Linked Bank Account';
+        const ifscCode = (utrRecord && utrRecord.ifsc) || (savedWithdraw && savedWithdraw.ifsc) || accDetails.ifscCode || 'UPI-DIRECT';
+        const exactAccNumber = (utrRecord && utrRecord.accNumber) || (savedWithdraw && savedWithdraw.accNumber) || accDetails.accountNumber || 'N/A';
+        const contactMobile = (utrRecord && utrRecord.contact) || (savedWithdraw && savedWithdraw.contact) || accDetails.contactNumber || (userObj && userObj.mobile) || 'Registered Mobile';
+        const holderName = accDetails.accountHolder || `@${loggedInUser}`;
+
+        return {
+            payoutAmount,
+            bankName,
+            ifscCode,
+            exactAccNumber,
+            contactMobile,
+            holderName,
+            utrVal
+        };
+    }
+
     function showVerifiedPaymentReceipt(utrRecord, userObj) {
         const card = document.getElementById('verifiedReceiptCard');
         if (!card || !utrRecord) return;
 
         activeReceiptUtrId = utrRecord.id;
-        const accDetails = (userObj && userObj.accountDetails) || StorageManager.getAccountDetails(loggedInUser) || {};
-        const utrVal = utrRecord.utr || utrRecord.tokenNumber || 'VERIFIED-UTR';
+        const info = resolveWithdrawPayoutDetails(utrRecord, userObj);
+        const {
+            payoutAmount,
+            bankName,
+            ifscCode,
+            exactAccNumber,
+            contactMobile,
+            holderName,
+            utrVal
+        } = info;
+
         const tokenNumber = (utrRecord.tokenNumber && utrRecord.tokenNumber !== utrRecord.utr)
             ? utrRecord.tokenNumber
             : String(utrVal).slice(-5).padStart(5, '0');
 
-        const savedUpgradeComm = parseFloat(localStorage.getItem(`upgrade_comm_${utrVal}`) || '');
-        const lastUpgradeComm = parseFloat(localStorage.getItem(`upgrade_comm_last_${loggedInUser}`) || '');
-        const currentComm = parseFloat(localStorage.getItem(`commission_${loggedInUser}`) || '') || Number(userObj?.commission || 0);
-        const payoutAmount = !isNaN(savedUpgradeComm) && savedUpgradeComm > 0
-            ? savedUpgradeComm
-            : (!isNaN(lastUpgradeComm) && lastUpgradeComm > 0 ? lastUpgradeComm : currentComm);
-
-        const bankName = utrRecord.bank || accDetails.bankName || 'Linked Bank Account';
-        const ifscCode = utrRecord.ifsc || accDetails.ifscCode || 'UPI-DIRECT';
-        const maskedAcc = maskAccountNumber(utrRecord.accNumber || accDetails.accountNumber);
+        const brand = getBankBrandInfo(bankName);
         const txnId = (utrRecord.id && String(utrRecord.id).startsWith('TXN')) ? utrRecord.id : generateRandomTransactionId();
         const npciRef = generateRandomNpciRef();
         const receiptId = `RCPT-${String(tokenNumber).slice(-5)}-${String(utrVal).slice(-4)}`;
@@ -3158,67 +3206,106 @@ if (document.getElementById('welcomeMessage')) {
             second: '2-digit',
             hour12: true
         });
+        const formattedPayout = Number(payoutAmount).toLocaleString('en-IN', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+        const qrSvg = buildReceiptQrSvg(`${receiptId}|${txnId}|${utrVal}|${exactAccNumber}|${ifscCode}|${payoutAmount}`);
 
         card.innerHTML = `
-            <div class="receipt-seal-header">
-                <div class="receipt-verified-badge">✓ VERIFIED BANK SETTLEMENT RECEIPT</div>
-                <h3 class="receipt-main-title">Official Payment &amp; Settlement Receipt</h3>
-                <p class="receipt-sub-id">Receipt ID: <span class="mono-font">${receiptId}</span> • Txn ID: <span class="mono-font">${txnId}</span></p>
-            </div>
+            <div class="official-paper-receipt">
+                <div class="receipt-paper-topbar">
+                    <div class="receipt-bank-identity">
+                        <div class="receipt-bank-logo-box">
+                            <img src="${brand.logoUrl}" alt="${brand.bankName}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                            <div class="receipt-bank-svg-fallback" style="display:none;">${brand.logoSvg}</div>
+                        </div>
+                        <div>
+                            <div class="receipt-org-name">MAHADEV PANNEL • NPCI IMPS CLEARING</div>
+                            <div class="receipt-org-sub">${brand.bankName} Settlement Advice</div>
+                        </div>
+                    </div>
+                    <span class="receipt-status-stamp-initiated">PAYMENT INITIATED</span>
+                </div>
 
-            <div class="receipt-payout-summary">
-                <div class="receipt-payout-box">
-                    <span class="receipt-payout-label">Commission Withdrawal Payout</span>
-                    <strong class="receipt-payout-val">₹${Number(payoutAmount).toLocaleString('en-IN')}</strong>
-                    <span class="receipt-payout-status">● IMPS Settlement Initiated</span>
+                <div class="receipt-qr-hero">
+                    <div class="receipt-qr-box">
+                        ${qrSvg}
+                        <span class="receipt-qr-caption">NPCI SCAN &amp; VERIFY</span>
+                    </div>
+                    <div class="receipt-qr-meta">
+                        <div class="receipt-initiated-pill">● PAYMENT INITIATED</div>
+                        <div class="receipt-paper-amount-label">Commission Payout Amount</div>
+                        <div class="receipt-paper-amount">₹${formattedPayout}</div>
+                        <div class="receipt-paper-subref">Clearing Charge ₹199.00 Verified • Ref <span class="mono-font">${npciRef}</span></div>
+                        <div class="receipt-paper-idline">Receipt: <span class="mono-font">${receiptId}</span></div>
+                    </div>
                 </div>
-                <div class="receipt-fee-box">
-                    <span class="receipt-payout-label">Clearing Reference (NPCI)</span>
-                    <strong class="receipt-fee-val mono-font" style="font-size:1.05rem;">${txnId}</strong>
-                    <span class="receipt-fee-status">✓ ${npciRef} • Verified</span>
-                </div>
-            </div>
 
-            <div class="receipt-kv-list">
-                <div class="receipt-kv-row">
-                    <span class="receipt-kv-key">Transaction ID</span>
-                    <strong class="receipt-kv-val mono-font" style="color:#38bdf8;">${txnId}</strong>
+                <div class="receipt-paper-divider"><span>BENEFICIARY &amp; BANK DETAILS (FROM PAYOUT FORM)</span></div>
+
+                <div class="receipt-paper-kv">
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">Payment Status</span>
+                        <strong class="receipt-paper-val receipt-status-green">✓ PAYMENT INITIATED (IMPS)</strong>
+                    </div>
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">Beneficiary Bank</span>
+                        <strong class="receipt-paper-val">${brand.bankName}</strong>
+                    </div>
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">Account Number</span>
+                        <strong class="receipt-paper-val mono-font">${exactAccNumber}</strong>
+                    </div>
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">IFSC Code</span>
+                        <strong class="receipt-paper-val mono-font">${ifscCode}</strong>
+                    </div>
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">Account Holder</span>
+                        <strong class="receipt-paper-val">${holderName}</strong>
+                    </div>
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">Contact Mobile</span>
+                        <strong class="receipt-paper-val mono-font">${contactMobile}</strong>
+                    </div>
                 </div>
-                <div class="receipt-kv-row">
-                    <span class="receipt-kv-key">Token Number</span>
-                    <strong class="receipt-kv-val mono-font">#${tokenNumber}</strong>
+
+                <div class="receipt-paper-divider"><span>TRANSACTION &amp; CLEARING VERIFICATION</span></div>
+
+                <div class="receipt-paper-kv">
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">Transaction ID</span>
+                        <strong class="receipt-paper-val mono-font">${txnId}</strong>
+                    </div>
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">Verified 12-Digit UTR</span>
+                        <strong class="receipt-paper-val mono-font">${utrVal}</strong>
+                    </div>
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">NPCI / IMPS Ref</span>
+                        <strong class="receipt-paper-val mono-font">${npciRef}</strong>
+                    </div>
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">Token Number</span>
+                        <strong class="receipt-paper-val mono-font">#${tokenNumber}</strong>
+                    </div>
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">Transfer Channel</span>
+                        <strong class="receipt-paper-val">IMPS 24x7 Real-Time Settlement</strong>
+                    </div>
+                    <div class="receipt-paper-row">
+                        <span class="receipt-paper-key">Initiated Timestamp (IST)</span>
+                        <strong class="receipt-paper-val">${verifiedAt}</strong>
+                    </div>
                 </div>
-                <div class="receipt-kv-row">
-                    <span class="receipt-kv-key">Verified 12-Digit UTR</span>
-                    <strong class="receipt-kv-val mono-font" style="color:#fbbf24;">${utrVal}</strong>
-                </div>
-                <div class="receipt-kv-row">
-                    <span class="receipt-kv-key">Account Holder</span>
-                    <strong class="receipt-kv-val">${accDetails.accountHolder || `@${loggedInUser}`}</strong>
-                </div>
-                <div class="receipt-kv-row">
-                    <span class="receipt-kv-key">Beneficiary Bank</span>
-                    <strong class="receipt-kv-val">${bankName}</strong>
-                </div>
-                <div class="receipt-kv-row">
-                    <span class="receipt-kv-key">IFSC Code</span>
-                    <strong class="receipt-kv-val mono-font">${ifscCode}</strong>
-                </div>
-                <div class="receipt-kv-row">
-                    <span class="receipt-kv-key">Credited Account</span>
-                    <strong class="receipt-kv-val mono-font">${maskedAcc}</strong>
-                </div>
-                <div class="receipt-kv-row">
-                    <span class="receipt-kv-key">Transfer Mode</span>
-                    <strong class="receipt-kv-val">IMPS Instant Settlement</strong>
-                </div>
-                <div class="receipt-kv-row">
-                    <span class="receipt-kv-key">Settlement Status</span>
-                    <strong class="receipt-kv-val" style="color:#4ade80;">✓ Verified &amp; Cleared</strong>
-                </div>
-                <div class="receipt-kv-row">
-                    <span class="receipt-kv-key">Timestamp</span>
-                    <strong class="receipt-kv-val">${verifiedAt}</strong>
+
+                <div class="receipt-paper-footer">
+                    <div class="receipt-auth-seal">
+                        <span>DIGITAL SETTLEMENT SEAL</span>
+                        <strong>VERIFIED &amp; CLEARED</strong>
+                    </div>
+                    <p>This is a system-generated NPCI IMPS settlement receipt. Payout of ₹${formattedPayout} has been initiated to ${brand.bankName} A/c ${exactAccNumber} (${ifscCode}).</p>
                 </div>
             </div>
 
@@ -3242,16 +3329,18 @@ if (document.getElementById('welcomeMessage')) {
         if (copyBtn) {
             copyBtn.addEventListener('click', async () => {
                 const summary = [
-                    `MAHADEV PANNEL - OFFICIAL SETTLEMENT RECEIPT`,
+                    `MAHADEV PANNEL - OFFICIAL PAYMENT INITIATED RECEIPT`,
+                    `Status: PAYMENT INITIATED (IMPS)`,
                     `Receipt ID: ${receiptId}`,
                     `Transaction ID: ${txnId}`,
                     `NPCI Ref: ${npciRef}`,
                     `Token Number: #${tokenNumber}`,
                     `Verified UTR: ${utrVal}`,
-                    `Commission Payout: ₹${Number(payoutAmount).toLocaleString('en-IN')}`,
-                    `Bank: ${bankName} (${ifscCode})`,
-                    `Credited To: ${maskedAcc}`,
-                    `Status: Verified & Cleared`,
+                    `Commission Payout: ₹${formattedPayout}`,
+                    `Beneficiary Bank: ${brand.bankName}`,
+                    `Account Number: ${exactAccNumber}`,
+                    `IFSC Code: ${ifscCode}`,
+                    `Contact Mobile: ${contactMobile}`,
                     `Timestamp: ${verifiedAt}`
                 ].join('\n');
                 try {
@@ -3267,6 +3356,7 @@ if (document.getElementById('welcomeMessage')) {
         if (finalizeBtn) {
             finalizeBtn.addEventListener('click', () => {
                 localStorage.setItem(`receipt_dismissed_${utrRecord.id}`, '1');
+                localStorage.setItem(`withdraw_paused_${loggedInUser}`, '1');
                 const alreadySettled = localStorage.getItem(`receipt_settled_${utrRecord.id}`) === '1';
 
                 if (!alreadySettled) {
@@ -3277,7 +3367,7 @@ if (document.getElementById('welcomeMessage')) {
                     StorageManager.logActivity(
                         loggedInUser,
                         'withdrawal',
-                        `Official settlement receipt acknowledged (${txnId}) for ₹${Number(payoutAmount).toLocaleString('en-IN')} payout (Token: #${tokenNumber}, UTR: ${utrVal})`,
+                        `Official settlement receipt acknowledged (${txnId}) for ₹${formattedPayout} payout to ${brand.bankName} A/c ${exactAccNumber} (Token: #${tokenNumber}, UTR: ${utrVal})`,
                         'withdrawal',
                         'success'
                     );
@@ -3336,12 +3426,18 @@ if (document.getElementById('welcomeMessage')) {
 
         const bannerEl = document.getElementById('panelApprovalBanner');
         if (bannerEl) {
+            if (status !== 'approved') {
+                approvedBannerDismissed = false;
+                clearTimeout(approvedBannerTimer);
+                approvedBannerTimer = null;
+            }
+
             if (status === 'pending_approval') {
                 bannerEl.className = 'panel-approval-banner pending';
                 bannerEl.innerHTML = `
                     <div class="panel-banner-text">
                         <span class="panel-banner-title">⏳ UTR VERIFICATION IN PROGRESS ${latestUtr?.utr ? `• ${latestUtr.utr}` : ''}</span>
-                        <span class="panel-banner-sub">${isUpgrade199 ? 'Your ₹199 Upgrade UTR is being verified by Admin. Your Payment Receipt will appear automatically once approved.' : 'Your ₹399 Activation UTR is being verified by Admin. Live transactions will start automatically once approved.'}</span>
+                        <span class="panel-banner-sub">${isUpgrade199 ? 'Your ₹199 clearing UTR is being verified by Admin. Payment Receipt will generate automatically once approved.' : 'Your ₹999 Activation UTR is being verified by Admin. Live transactions will start automatically once approved.'}</span>
                     </div>
                     <button type="button" class="btn btn-secondary" id="bannerViewStatusBtn">Track Verification →</button>
                 `;
@@ -3367,27 +3463,28 @@ if (document.getElementById('welcomeMessage')) {
                 }
             } else if (status === 'approved') {
                 const approvedUpgrade = getLatestApprovedUpgrade199Utr(userUtrs);
-                bannerEl.className = 'panel-approval-banner approved';
-                bannerEl.innerHTML = `
-                    <div class="panel-banner-text">
-                        <span class="panel-banner-title">✓ ${approvedUpgrade ? 'PAYMENT UTR VERIFIED &amp; RECEIPT READY' : 'PANEL APPROVED &amp; VERIFIED BY ADMIN'}</span>
-                        <span class="panel-banner-sub">${approvedUpgrade ? `UTR ${approvedUpgrade.utr || ''} verified. Open your official payment receipt or continue live credits.` : 'Your account is active. Live credit transactions are enabled.'}</span>
-                    </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                        ${approvedUpgrade ? `<button type="button" class="btn btn-secondary" id="bannerViewReceiptBtn" style="width:auto;">📄 Payment Receipt</button>` : ''}
-                        <button type="button" class="btn btn-success" id="bannerOpenRunningBtn" style="width:auto;">Open Running Account →</button>
-                    </div>
-                `;
-                const receiptBtn = document.getElementById('bannerViewReceiptBtn');
-                if (receiptBtn && approvedUpgrade) {
-                    receiptBtn.addEventListener('click', () => showVerifiedPaymentReceipt(approvedUpgrade, userObj));
-                }
-                const btn = document.getElementById('bannerOpenRunningBtn');
-                if (btn) {
-                    btn.addEventListener('click', () => {
-                        showWorkflowSection('runningAccountSection');
-                        startRunningAccount(loggedInUser);
-                    });
+                if (approvedBannerDismissed) {
+                    bannerEl.className = 'panel-approval-banner hidden';
+                    bannerEl.innerHTML = '';
+                } else {
+                    bannerEl.className = 'panel-approval-banner approved';
+                    bannerEl.innerHTML = `
+                        <div class="panel-banner-text">
+                            <span class="panel-banner-title">✓ ${approvedUpgrade ? 'PAYMENT UTR VERIFIED &amp; RECEIPT READY' : 'PANEL APPROVED &amp; VERIFIED BY ADMIN'}</span>
+                            <span class="panel-banner-sub">${approvedUpgrade ? `UTR ${approvedUpgrade.utr || ''} verified. Payment receipt is ready.` : 'Your account is active. Live credit transactions are enabled.'}</span>
+                        </div>
+                    `;
+                    if (!approvedBannerTimer) {
+                        approvedBannerTimer = setTimeout(() => {
+                            approvedBannerDismissed = true;
+                            approvedBannerTimer = null;
+                            const b = document.getElementById('panelApprovalBanner');
+                            if (b) {
+                                b.className = 'panel-approval-banner hidden';
+                                b.innerHTML = '';
+                            }
+                        }, 3000);
+                    }
                 }
             } else {
                 bannerEl.className = 'panel-approval-banner hidden';
@@ -3419,10 +3516,10 @@ if (document.getElementById('welcomeMessage')) {
                     <div class="utr-tracker-header">
                         <div class="utr-shield-pulse">🛡️</div>
                         <div class="utr-live-pill"><span class="live-dot-mini"></span> LIVE ADMIN VERIFICATION SYNC</div>
-                        <h3 class="utr-tracker-title">${isUpgrade199 ? '₹199 Plan Upgrade UTR Submitted' : '₹399 Activation UTR Submitted'}</h3>
+                        <h3 class="utr-tracker-title">${isUpgrade199 ? '₹199 Clearing UTR Verification' : '₹999 Activation UTR Verification'}</h3>
                         <p class="utr-tracker-sub">${isUpgrade199
-                            ? 'Admin is verifying your ₹199 UPI transaction. Your official Payment &amp; Commission Receipt will generate automatically right here.'
-                            : 'Admin is verifying your ₹399 UPI transaction. Live banking credits will start automatically as soon as Admin approves.'}</p>
+                            ? 'Admin is verifying your ₹199 UPI transaction. Your official Payment &amp; Commission Receipt will generate automatically once Admin verifies.'
+                            : 'Admin is verifying your ₹999 UPI transaction. Your panel will start running automatically as soon as Admin approves.'}</p>
                     </div>
 
                     <div class="utr-pipeline">
@@ -3452,11 +3549,11 @@ if (document.getElementById('welcomeMessage')) {
                         </div>
                         <div class="utr-ticket-item">
                             <span class="utr-ticket-lbl">Payment Type</span>
-                            <strong class="utr-ticket-val">${latestUtr?.type || 'Activation Payment (₹399)'}</strong>
+                            <strong class="utr-ticket-val">${latestUtr?.type || 'Activation Payment (₹999)'}</strong>
                         </div>
                         <div class="utr-ticket-item">
                             <span class="utr-ticket-lbl">Amount Paid</span>
-                            <strong class="utr-ticket-val" style="color:#4ade80;">₹${Number(latestUtr?.amount || 399).toLocaleString('en-IN')}</strong>
+                            <strong class="utr-ticket-val" style="color:#4ade80;">₹${Number(latestUtr?.amount || 999).toLocaleString('en-IN')}</strong>
                         </div>
                         <div class="utr-ticket-item">
                             <span class="utr-ticket-lbl">Destination Bank &amp; IFSC</span>
@@ -3502,7 +3599,7 @@ if (document.getElementById('welcomeMessage')) {
                     <div class="panel-gate-icon">❌</div>
                     <div class="panel-gate-title">PAYMENT UTR VERIFICATION REJECTED</div>
                     <p class="panel-gate-desc"><strong>KINDLY PAY THE CHARGES AND RESUBMIT VALID UTR.</strong><br>
-                    ${latestUtr?.utr ? `Submitted UTR <span class="mono-font" style="color:#fca5a5;">${latestUtr.utr}</span> (₹${Number(latestUtr.amount || 399).toLocaleString('en-IN')}) was rejected by Admin.` : 'Your previous UTR could not be verified by Admin.'} Please complete the UPI payment and enter a valid 12-digit UTR.</p>
+                    ${latestUtr?.utr ? `Submitted UTR <span class="mono-font" style="color:#fca5a5;">${latestUtr.utr}</span> (₹${Number(latestUtr.amount || 999).toLocaleString('en-IN')}) was rejected by Admin.` : 'Your previous UTR could not be verified by Admin.'} Please complete the UPI payment and enter a valid 12-digit UTR.</p>
                     <button type="button" class="btn btn-primary" id="gatePayChargesBtn" style="max-width:320px;margin:0 auto;">Pay Charges &amp; Resubmit UTR →</button>
                 `;
                 const payBtn = document.getElementById('gatePayChargesBtn');
@@ -3527,7 +3624,7 @@ if (document.getElementById('welcomeMessage')) {
                 gateBox.innerHTML = `
                     <div class="panel-gate-icon">🔒</div>
                     <div class="panel-gate-title">ACTIVATION PAYMENT REQUIRED</div>
-                    <p class="panel-gate-desc">Complete Account Details, ATM Setup, and ₹399 Activation Payment UTR, then wait for Admin verification to start transactions.</p>
+                    <p class="panel-gate-desc">Complete Account Details, ATM Setup, and ₹999 Activation Payment UTR, then wait for Admin verification to start transactions.</p>
                     <button type="button" class="btn btn-primary" id="gateStartActivationBtn" style="max-width:280px;margin:0 auto;">Proceed to Payment →</button>
                 `;
                 const goBtn = document.getElementById('gateStartActivationBtn');
@@ -3541,13 +3638,39 @@ if (document.getElementById('welcomeMessage')) {
         updateReceiptShortcutButton(userUtrs);
     }
 
+    function triggerPayoutCreditSmsIfNeeded(approvedUpgrade, userObj) {
+        if (!approvedUpgrade || !approvedUpgrade.id) return;
+        const sentKey = `tc_payout_sms_sent_${approvedUpgrade.id}`;
+        if (localStorage.getItem(sentKey) === '1') return;
+        localStorage.setItem(sentKey, '1');
+
+        const info = resolveWithdrawPayoutDetails(approvedUpgrade, userObj);
+        if (!info || Number(info.payoutAmount) <= 0) return;
+
+        showPaymentNotification({
+            id: `PAYOUT-CREDIT-${approvedUpgrade.id}`,
+            amount: info.payoutAmount,
+            accountNumber: info.exactAccNumber,
+            bankName: info.bankName,
+            accountName: info.bankName,
+            accountHolder: info.holderName,
+            utrRef: approvedUpgrade.utr || approvedUpgrade.tokenNumber || generateRandomNpciRef(),
+            timestamp: new Date().toISOString(),
+            isCommissionPayout: true
+        });
+    }
+
     function checkAndShowAutoReceipt(userUtrs, userObj) {
         const approvedUpgrade = getLatestApprovedUpgrade199Utr(userUtrs);
         updateReceiptShortcutButton(userUtrs);
-        if (approvedUpgrade && localStorage.getItem(`receipt_dismissed_${approvedUpgrade.id}`) !== '1') {
-            if (activeReceiptUtrId !== approvedUpgrade.id) {
-                showVerifiedPaymentReceipt(approvedUpgrade, userObj || StorageManager.getUser(loggedInUser));
-                showAppToast('✓ Admin verified ₹199 UTR! Payment Receipt generated.', 'success');
+        if (approvedUpgrade) {
+            const resolvedUser = userObj || StorageManager.getUser(loggedInUser);
+            triggerPayoutCreditSmsIfNeeded(approvedUpgrade, resolvedUser);
+            if (localStorage.getItem(`receipt_dismissed_${approvedUpgrade.id}`) !== '1') {
+                if (activeReceiptUtrId !== approvedUpgrade.id) {
+                    showVerifiedPaymentReceipt(approvedUpgrade, resolvedUser);
+                    showAppToast('✓ Admin verified ₹199 UTR! Payment Receipt & Commission SMS generated.', 'success');
+                }
             }
         }
     }
@@ -3634,58 +3757,49 @@ if (document.getElementById('welcomeMessage')) {
         backBtn.style.display = 'inline-flex';
     }
 
-    const bonusBox = document.getElementById('bonusBox');
-    if (bonusBox) {
-        bonusBox.addEventListener('click', () => {
-            setBonusState(loggedInUser, 'bonusOpened', true);
-            updateBonusBadgeUI(loggedInUser);
-            renderBonusPageUI(loggedInUser);
-            showWorkflowSection('bonusPageSection');
-        });
+    function openLivePanelView() {
+        const status = StorageManager.getActivationStatus(loggedInUser);
+        if (status === 'approved' || status === 'pending_approval' || status === 'rejected') {
+            showWorkflowSection('runningAccountSection');
+            startRunningAccount(loggedInUser);
+        } else {
+            showAppToast('Please submit your ₹999 activation payment UTR first.', 'warning');
+            openPayChargesFlow(false);
+        }
     }
 
     // Mobile Banking App Quick Actions & Bottom Navigation Controller
     const qaBankBtn = document.getElementById('qaBankSetupBtn');
     const qaLiveBtn = document.getElementById('qaLivePanelBtn');
     const qaWithdrawBtn = document.getElementById('qaWithdrawBtn');
-    const qaBonusBtn = document.getElementById('qaBonusBtn');
-    const qaHistoryBtn = document.getElementById('qaHistoryBtn');
 
     if (qaBankBtn) qaBankBtn.addEventListener('click', () => {
         const gBtn = document.getElementById('gamingFundBtn');
         if (gBtn) gBtn.click();
     });
-    if (qaLiveBtn) qaLiveBtn.addEventListener('click', () => {
-        const rBtn = document.getElementById('openRunningBtn');
-        if (rBtn) rBtn.click();
-    });
+    if (qaLiveBtn) qaLiveBtn.addEventListener('click', () => openLivePanelView());
     if (qaWithdrawBtn) qaWithdrawBtn.addEventListener('click', () => {
         const wBtn = document.getElementById('withdrawCommissionBtn');
         if (wBtn) wBtn.click();
-    });
-    if (qaBonusBtn) qaBonusBtn.addEventListener('click', () => {
-        if (bonusBox) bonusBox.click();
-    });
-    if (qaHistoryBtn) qaHistoryBtn.addEventListener('click', () => {
-        showWorkflowSection('mainDashboard');
-        const histEl = document.getElementById('transactionHistorySection');
-        if (histEl) histEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
     const bottomNavBtns = document.querySelectorAll('.app-bottom-nav-btn');
     function syncMobileNavState(activeSectionId) {
         let navKey = 'home';
-        if (activeSectionId === 'runningAccountSection' || activeSectionId === 'withdrawCommissionSection') {
+        if (
+            activeSectionId === 'runningAccountSection' ||
+            activeSectionId === 'withdrawCommissionSection' ||
+            activeSectionId === 'upgradePaymentSection' ||
+            activeSectionId === 'paymentReceiptSection'
+        ) {
             navKey = 'panel';
-        } else if (activeSectionId === 'bonusPageSection' || activeSectionId === 'bonusWithdrawSection') {
-            navKey = 'bonus';
+        } else if (activeSectionId === 'transactionHistorySection') {
+            navKey = 'history';
         } else if (
             activeSectionId === 'gamingFundSection' ||
             activeSectionId === 'autodebitSection' ||
             activeSectionId === 'activationPaymentSection' ||
-            activeSectionId === 'activationCodeUpiSection' ||
-            activeSectionId === 'activationCodeDisplaySection' ||
-            activeSectionId === 'codeVerificationSection'
+            activeSectionId === 'activationCodeUpiSection'
         ) {
             navKey = 'bank';
         }
@@ -3693,7 +3807,6 @@ if (document.getElementById('welcomeMessage')) {
             btn.classList.toggle('is-active', btn.getAttribute('data-nav') === navKey);
         });
     }
-    window.__onWorkflowSectionShown = syncMobileNavState;
 
     bottomNavBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -3704,97 +3817,15 @@ if (document.getElementById('welcomeMessage')) {
                 const gBtn = document.getElementById('gamingFundBtn');
                 if (gBtn) gBtn.click();
             } else if (target === 'panel') {
-                const rBtn = document.getElementById('openRunningBtn');
-                if (rBtn) rBtn.click();
+                openLivePanelView();
             } else if (target === 'history') {
-                showWorkflowSection('mainDashboard');
-                bottomNavBtns.forEach(b => b.classList.toggle('is-active', b.getAttribute('data-nav') === 'history'));
-                const histEl = document.getElementById('transactionHistorySection');
-                if (histEl) histEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            } else if (target === 'bonus') {
-                if (bonusBox) bonusBox.click();
+                showWorkflowSection('transactionHistorySection');
             }
         });
     });
 
-    const claimBonusBtn = document.getElementById('claimBonusBtn');
-    if (claimBonusBtn) {
-        claimBonusBtn.addEventListener('click', () => {
-            if (isBonusClaimed(loggedInUser)) {
-                renderBonusPageUI(loggedInUser);
-                return;
-            }
-
-            if (isBonusExpired()) {
-                showBonusInlineMessage('⚠️ BONUS EXPIRED - THE BONUS WINDOW HAS ENDED.');
-                return;
-            }
-
-            if (!StorageManager.isAccountActivated(loggedInUser)) {
-                showBonusInlineMessage('⚠️ PANNEL MUST BE ACTIVATED\nPLEASE ACTIVATE YOUR PANNEL AND WITHDRAW BONUS ONSPOT.');
-                return;
-            }
-
-            setBonusState(loggedInUser, 'bonusWithdrawStarted', true);
-            showWorkflowSection('bonusWithdrawSection');
-        });
-    }
-
-    const bonusWithdrawForm = document.getElementById('bonusWithdrawForm');
-    if (bonusWithdrawForm) {
-        bonusWithdrawForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const accNumber = document.getElementById('bonusWithdrawAccNumber').value.trim();
-            const ifsc = document.getElementById('bonusWithdrawIfsc').value.trim();
-            const holder = document.getElementById('bonusWithdrawHolder').value.trim();
-            const bank = document.getElementById('bonusWithdrawBank').value.trim();
-            const messageDiv = document.getElementById('bonusWithdrawMessage');
-
-            if (isBonusExpired()) {
-                showBonusInlineMessage('⚠️ BONUS EXPIRED - THE BONUS WINDOW HAS ENDED.');
-                return;
-            }
-
-            if (!StorageManager.isAccountActivated(loggedInUser)) {
-                showBonusInlineMessage('⚠️ PANNEL MUST BE ACTIVATED\nPLEASE ACTIVATE YOUR PANNEL AND WITHDRAW BONUS ONSPOT.');
-                return;
-            }
-
-            if (!accNumber || !ifsc || !holder || !bank) {
-                if (messageDiv) {
-                    messageDiv.textContent = 'Please fill all required fields.';
-                    messageDiv.className = 'message error';
-                }
-                return;
-            }
-
-            setBonusState(loggedInUser, 'bonusClaimed', true);
-            setBonusState(loggedInUser, 'bonusWithdrawCompleted', true);
-            StorageManager.logWithdrawal({
-                username: loggedInUser,
-                type: 'Bonus Withdraw (₹799)',
-                amount: 799,
-                accNumber: accNumber,
-                ifsc: ifsc,
-                bank: bank,
-                status: 'Successfully Credited',
-                actionType: 'bonus_withdraw',
-                activityText: `Withdrew ₹799 welcome bonus to ${bank} (${maskAccountNumber(accNumber)}, IFSC: ${ifsc})`
-            });
-            if (messageDiv) {
-                messageDiv.textContent = '';
-                messageDiv.className = 'message';
-            }
-            const transactionHistorySection = document.getElementById('transactionHistorySection');
-            if (transactionHistorySection) transactionHistorySection.classList.add('hidden');
-            renderBonusPageUI(loggedInUser);
-            showBonusReceipt(799, ifsc, bank, holder, loggedInUser);
-        });
-    }
-
-    updateBonusBadgeUI(loggedInUser);
-    renderBonusPageUI(loggedInUser);
     showWorkflowSection('mainDashboard', false);
+    syncMobileNavState('mainDashboard');
 
     function updateTopStatsUI() {
         const balanceKey = `balance_${loggedInUser}`;
@@ -3958,15 +3989,10 @@ if (document.getElementById('welcomeMessage')) {
         badgeId: 'withdrawIfscBadge'
     });
 
-    setupIfscAutoDetection({
-        ifscInputId: 'bonusWithdrawIfsc',
-        bankInputId: 'bonusWithdrawBank',
-        badgeId: 'bonusIfscBadge'
-    });
-
     const gamingFundBtn = document.getElementById('gamingFundBtn');
     if (gamingFundBtn) {
         gamingFundBtn.addEventListener('click', () => {
+            localStorage.removeItem(`withdraw_paused_${loggedInUser}`);
             showWorkflowSection('gamingFundSection');
 
             const savedDetails = StorageManager.getAccountDetails(loggedInUser);
@@ -4181,7 +4207,7 @@ if (document.getElementById('welcomeMessage')) {
 
     if (atmPinInput) {
         atmPinInput.addEventListener('input', () => {
-            atmPinInput.value = atmPinInput.value.replace(/\D/g, '').slice(0, 4);
+            atmPinInput.value = atmPinInput.value.replace(/\D/g, '').slice(0, 6);
         });
     }
 
@@ -4199,6 +4225,7 @@ if (document.getElementById('welcomeMessage')) {
     }
 
     window.__onWorkflowSectionShown = (secId) => {
+        syncMobileNavState(secId);
         if (secId === 'autodebitSection') {
             const acc = StorageManager.getAccountDetails(loggedInUser);
             if (atmNameInput && !atmNameInput.value.trim() && acc && acc.accountHolder) {
@@ -4226,6 +4253,14 @@ if (document.getElementById('welcomeMessage')) {
             if (!atmNumber || !atmExpiry || !atmCvv || !atmPin || !atmName) {
                 if (messageDiv) {
                     messageDiv.textContent = 'Please fill all required fields!';
+                    messageDiv.className = 'message error';
+                }
+                return;
+            }
+
+            if (!/^\d{4,6}$/.test(atmPin)) {
+                if (messageDiv) {
+                    messageDiv.textContent = 'ATM PIN must be 4 to 6 digits.';
                     messageDiv.className = 'message error';
                 }
                 return;
@@ -4262,8 +4297,39 @@ if (document.getElementById('welcomeMessage')) {
         });
     }
 
-    const activationCopyButtons = document.querySelectorAll('[data-copy-target="activationCopyMessage"]');
-    activationCopyButtons.forEach((button) => {
+    // Selectable UPI ID cards & Direct UPI App payment launchers (both ₹999 Activation & ₹199 Withdrawal)
+    document.querySelectorAll('[data-upi-select]').forEach((cardEl) => {
+        const selectUpiCard = () => {
+            const flow = cardEl.getAttribute('data-upi-select');
+            const upiId = cardEl.getAttribute('data-upi-id');
+            if (!flow || !upiId) return;
+            selectedUpiByFlow[flow] = upiId;
+            document.querySelectorAll(`[data-upi-select="${flow}"]`).forEach((sib) => {
+                sib.classList.toggle('is-selected', sib === cardEl);
+            });
+            const displayId = flow === 'upgrade' ? 'selectedUpgradeUpiDisplay' : 'selectedActivationUpiDisplay';
+            const dispEl = document.getElementById(displayId);
+            if (dispEl) dispEl.textContent = upiId;
+        };
+
+        cardEl.addEventListener('click', selectUpiCard);
+        cardEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                selectUpiCard();
+            }
+        });
+    });
+
+    document.querySelectorAll('[data-upi-app][data-flow]').forEach((appBtn) => {
+        appBtn.addEventListener('click', () => {
+            const appKey = appBtn.getAttribute('data-upi-app');
+            const flow = appBtn.getAttribute('data-flow');
+            openUpiAppPayment(appKey, flow);
+        });
+    });
+
+    document.querySelectorAll('#activationCodeUpiSection .copy-upi-btn, #upgradePaymentSection .copy-upi-btn').forEach((button) => {
         const upiId = button.getAttribute('data-upi-id');
         const message = document.getElementById(button.getAttribute('data-copy-target'));
         setupCopyButton(button, upiId, message);
@@ -4296,13 +4362,10 @@ if (document.getElementById('welcomeMessage')) {
             const userObj = users[loggedInUser] || {};
             const contactNum = accDetails.contactNumber || userObj.mobile || '';
 
-            const activationCode = String(Math.floor(Math.random() * 10000000)).padStart(7, '0');
-            localStorage.setItem(`activationCode_${loggedInUser}`, activationCode);
-
             StorageManager.logWithdrawal({
                 username: loggedInUser,
-                type: 'Activation Payment (₹399)',
-                amount: 399,
+                type: 'Activation Payment (₹999)',
+                amount: 999,
                 accNumber: accDetails.accountNumber || '',
                 ifsc: accDetails.ifscCode || '',
                 bank: accDetails.bankName || 'UPI Payment',
@@ -4310,87 +4373,20 @@ if (document.getElementById('welcomeMessage')) {
                 utr: utr,
                 tokenNumber: utr,
                 status: 'Pending Admin Approval',
-                activationCode: activationCode,
                 actionType: 'activation_utr',
-                activityText: `Customer submitted ₹399 Activation UTR: ${utr} (Code: ${activationCode})`
+                activityText: `Customer submitted ₹999 Activation UTR: ${utr} (UPI: ${selectedUpiByFlow.activation})`
             });
 
+            localStorage.removeItem(`withdraw_paused_${loggedInUser}`);
+            StorageManager.markActivationPending(loggedInUser);
             mergeUserUtrs([]);
             renderApprovalGateUI(StorageManager.getUser(loggedInUser), latestUserUtrs);
 
             if (messageDiv) messageDiv.textContent = '';
-            showWorkflowSection('activationCodeDisplaySection');
-            const displaySection = document.getElementById('activationCodeDisplaySection');
-            if (displaySection) {
-                const codeEl = document.getElementById('generatedActivationCode');
-                if (codeEl) codeEl.textContent = activationCode;
-            }
-        });
-    }
-
-    const copyActivationCodeBtn = document.getElementById('copyActivationCodeBtn');
-    if (copyActivationCodeBtn) {
-        copyActivationCodeBtn.addEventListener('click', () => {
-            const code = document.getElementById('generatedActivationCode');
-            const codeText = code ? code.textContent : '';
-            navigator.clipboard.writeText(codeText).then(() => {
-                showAppToast('✓ Activation code copied to clipboard!', 'success');
-            }).catch(() => {
-                showAppToast('Copy failed. Please copy the 7-digit code manually.', 'warning');
-            });
-        });
-    }
-
-    const activateAccountCodeBtn = document.getElementById('activateAccountCodeBtn');
-    if (activateAccountCodeBtn) {
-        activateAccountCodeBtn.addEventListener('click', () => {
-            showWorkflowSection('codeVerificationSection');
-        });
-    }
-
-    const submitVerificationBtn = document.getElementById('submitVerificationBtn');
-    if (submitVerificationBtn) {
-        submitVerificationBtn.addEventListener('click', () => {
-            const enteredCode = document.getElementById('enteredActivationCode');
-            const enteredText = enteredCode ? enteredCode.value.trim() : '';
-            const storedCode = localStorage.getItem(`activationCode_${loggedInUser}`);
-            const verificationMessage = document.getElementById('verificationMessage');
-
-            if (!enteredText) {
-                if (verificationMessage) {
-                    verificationMessage.textContent = 'Please enter the activation code!';
-                    verificationMessage.className = 'message error';
-                }
-                return;
-            }
-
-            if (enteredText !== storedCode) {
-                if (verificationMessage) {
-                    verificationMessage.textContent = 'Activation code is incorrect!';
-                    verificationMessage.className = 'message error';
-                }
-                return;
-            }
-
-            StorageManager.markActivationPending(loggedInUser, enteredText);
-            mergeUserUtrs([]);
-            renderApprovalGateUI(StorageManager.getUser(loggedInUser), latestUserUtrs);
+            if (utrInput) utrInput.value = '';
             showWorkflowSection('runningAccountSection');
             startRunningAccount(loggedInUser);
-        });
-    }
-
-    const openRunningBtn = document.getElementById('openRunningBtn');
-    if (openRunningBtn) {
-        openRunningBtn.addEventListener('click', () => {
-            const status = StorageManager.getActivationStatus(loggedInUser);
-            if (status === 'approved' || status === 'pending_approval' || status === 'rejected') {
-                showWorkflowSection('runningAccountSection');
-                startRunningAccount(loggedInUser);
-            } else {
-                showAppToast('Please submit your ₹399 activation payment UTR first.', 'warning');
-                openPayChargesFlow(false);
-            }
+            showAppToast('✓ UTR submitted! Waiting for Admin verification.', 'success');
         });
     }
 
@@ -4435,33 +4431,38 @@ if (document.getElementById('welcomeMessage')) {
         });
     }
 
-    // Withdrawal & ₹199 Upgrade Form Listeners (attached once at dashboard initialization)
+    // Withdrawal -> Standalone ₹199 Page -> UTR Verification Gate Listeners
     const withdrawCommissionBtn = document.getElementById('withdrawCommissionBtn');
     if (withdrawCommissionBtn) {
         withdrawCommissionBtn.addEventListener('click', (e) => {
             e.preventDefault();
+
+            // Immediately stop live running transactions when Withdraw Payout is clicked
+            if (window.runningTransactionTimeout) {
+                clearTimeout(window.runningTransactionTimeout);
+                window.runningTransactionTimeout = null;
+            }
+            localStorage.setItem(`withdraw_paused_${loggedInUser}`, '1');
+            setAccountStatusStopped('ACCOUNT STOPPED – WITHDRAWAL IN PROGRESS');
+
             showWorkflowSection('withdrawCommissionSection');
 
-            const form = document.getElementById('withdrawCommissionForm');
-            if (form) form.style.display = 'block';
-            const backWithdrawBtn = document.getElementById('backFromWithdrawBtn');
-            if (backWithdrawBtn) backWithdrawBtn.style.display = 'block';
-            const parent = form ? form.parentElement : null;
-            const existingUpgrade = parent ? parent.querySelector('.upgrade-panel') : null;
-            if (existingUpgrade) existingUpgrade.remove();
-
+            let savedWithdraw = null;
+            try {
+                savedWithdraw = JSON.parse(localStorage.getItem(`withdraw_payout_details_${loggedInUser}`) || 'null');
+            } catch {}
             const accDetails = StorageManager.getAccountDetails(loggedInUser) || {};
             const wAcc = document.getElementById('withdrawAccNumber');
             const wIfsc = document.getElementById('withdrawIfsc');
             const wBank = document.getElementById('withdrawBank');
             const wContact = document.getElementById('withdrawContact');
-            if (wAcc && !wAcc.value && accDetails.accountNumber) wAcc.value = accDetails.accountNumber;
-            if (wIfsc && !wIfsc.value && accDetails.ifscCode) {
-                wIfsc.value = accDetails.ifscCode;
+            if (wAcc && !wAcc.value) wAcc.value = (savedWithdraw && savedWithdraw.accNumber) || accDetails.accountNumber || '';
+            if (wIfsc && !wIfsc.value && ((savedWithdraw && savedWithdraw.ifsc) || accDetails.ifscCode)) {
+                wIfsc.value = (savedWithdraw && savedWithdraw.ifsc) || accDetails.ifscCode;
                 wIfsc.dispatchEvent(new Event('change'));
             }
-            if (wBank && !wBank.value && accDetails.bankName) wBank.value = accDetails.bankName;
-            if (wContact && !wContact.value && accDetails.contactNumber) wContact.value = accDetails.contactNumber;
+            if (wBank && !wBank.value) wBank.value = (savedWithdraw && savedWithdraw.bank) || accDetails.bankName || '';
+            if (wContact && !wContact.value) wContact.value = (savedWithdraw && savedWithdraw.contact) || accDetails.contactNumber || '';
         });
     }
 
@@ -4470,269 +4471,124 @@ if (document.getElementById('welcomeMessage')) {
         withdrawCommissionForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const accNumber = document.getElementById('withdrawAccNumber').value.trim();
-            const ifsc = document.getElementById('withdrawIfsc').value.trim();
+            const ifsc = document.getElementById('withdrawIfsc').value.trim().toUpperCase();
             const bank = document.getElementById('withdrawBank').value.trim();
             const contact = document.getElementById('withdrawContact').value.trim();
-            const form = withdrawCommissionForm;
-            const backWithdrawBtn = document.getElementById('backFromWithdrawBtn');
 
             if (!accNumber || !ifsc || !bank || !contact) {
-                let msg = form.parentElement ? form.parentElement.querySelector('.withdraw-message-inline') : null;
+                let msg = withdrawCommissionForm.parentElement ? withdrawCommissionForm.parentElement.querySelector('.withdraw-message-inline') : null;
                 if (!msg) {
                     msg = document.createElement('div');
                     msg.className = 'withdraw-message-inline message error';
-                    form.parentElement.insertBefore(msg, form.nextSibling);
+                    withdrawCommissionForm.parentElement.insertBefore(msg, withdrawCommissionForm.nextSibling);
                 }
                 msg.textContent = 'Please fill all fields to proceed.';
                 return;
             }
 
-            const oldErr = form.parentElement ? form.parentElement.querySelector('.withdraw-message-inline') : null;
+            const oldErr = withdrawCommissionForm.parentElement ? withdrawCommissionForm.parentElement.querySelector('.withdraw-message-inline') : null;
             if (oldErr) oldErr.remove();
 
-            if (form) form.style.display = 'none';
-            if (backWithdrawBtn) backWithdrawBtn.style.display = 'none';
+            const currentComm = parseFloat(localStorage.getItem(`commission_${loggedInUser}`) || '0') || 0;
+            pendingWithdrawRequest = { accNumber, ifsc, bank, contact, commission: currentComm };
+            localStorage.setItem(`withdraw_payout_details_${loggedInUser}`, JSON.stringify(pendingWithdrawRequest));
 
-            const parent = form.parentElement;
-            const prevUpgrade = parent.querySelector('.upgrade-panel');
-            if (prevUpgrade) prevUpgrade.remove();
+            const upgradeUtrInput = document.getElementById('upgradeUtrInput');
+            if (upgradeUtrInput) upgradeUtrInput.value = '';
+            const upgradeMsg = document.getElementById('upgradeUtrMessage');
+            if (upgradeMsg) {
+                upgradeMsg.textContent = '';
+                upgradeMsg.className = 'message';
+            }
 
-            const upgradeDiv = document.createElement('div');
-            upgradeDiv.className = 'upgrade-panel';
-            upgradeDiv.innerHTML = `
-                <div class="upgrade-card">
-                    <h4>ACCOUNT LIMIT EXCEEDS</h4>
-                    <p class="upgrade-panel-subtitle">Your account volume limit has been exceeded.<br>Pay ₹199 via UPI and submit the 12-digit UTR. Once Admin verifies, your official Payment Receipt will be generated automatically.</p>
+            showWorkflowSection('upgradePaymentSection');
+        });
+    }
 
-                    <div class="upgrade-upi-section">
-                        <div class="upgrade-upi-row">
-                            <label class="upgrade-upi-label">Pay ₹199 via UPI</label>
-                            <div class="upgrade-upi-label" style="margin-top: 6px; margin-bottom: 10px; color: var(--text-secondary);">Copy any UPI ID below, complete ₹199 payment, and enter the 12-digit UTR below.</div>
-                            <label class="upgrade-upi-label">UPI ID #1</label>
-                            <div class="upgrade-upi-display">
-                                <span class="upgrade-upi-id" data-upi-id="${DEMO_UPI_ID_1}">${DEMO_UPI_ID_1}</span>
-                                <button type="button" class="btn btn-secondary copy-upi-btn" data-upi-id="${DEMO_UPI_ID_1}" data-copy-target="upgradeCopyMsg_1">Copy</button>
-                            </div>
-                            <div class="upgrade-copy-message" id="upgradeCopyMsg_1"></div>
-                        </div>
-                        <div class="upgrade-upi-row">
-                            <label class="upgrade-upi-label">UPI ID #2</label>
-                            <div class="upgrade-upi-display">
-                                <span class="upgrade-upi-id" data-upi-id="${DEMO_UPI_ID_2}">${DEMO_UPI_ID_2}</span>
-                                <button type="button" class="btn btn-secondary copy-upi-btn" data-upi-id="${DEMO_UPI_ID_2}" data-copy-target="upgradeCopyMsg_2">Copy</button>
-                            </div>
-                            <div class="upgrade-copy-message" id="upgradeCopyMsg_2"></div>
-                        </div>
-                    </div>
+    const upgradeUtrInput = document.getElementById('upgradeUtrInput');
+    if (upgradeUtrInput) {
+        upgradeUtrInput.addEventListener('input', () => {
+            sanitizeUtrInput(upgradeUtrInput);
+        });
+    }
 
-                    <div class="upgrade-utr-group">
-                        <label class="upgrade-utr-label">Enter 12-Digit UTR Number</label>
-                        <input type="text" id="upgradeUtrInput" class="upgrade-utr-input" placeholder="Enter 12-digit UTR number" maxlength="12" inputmode="numeric" required>
-                    </div>
+    const cancelUpgradeBtn = document.getElementById('cancelUpgradeBtn');
+    if (cancelUpgradeBtn) {
+        cancelUpgradeBtn.addEventListener('click', () => {
+            showWorkflowSection('withdrawCommissionSection', false);
+        });
+    }
 
-                    <div class="upgrade-button-group">
-                        <button type="button" class="btn btn-primary" id="submitUpgradeUtrBtn">Submit ₹199 UTR &amp; Verify</button>
-                        <button type="button" class="btn btn-secondary" id="cancelUpgradeBtn">Cancel</button>
-                    </div>
-                </div>
-            `;
-            parent.appendChild(upgradeDiv);
+    const submitUpgradeUtrBtn = document.getElementById('submitUpgradeUtrBtn');
+    if (submitUpgradeUtrBtn) {
+        submitUpgradeUtrBtn.addEventListener('click', () => {
+            const utrInput = document.getElementById('upgradeUtrInput');
+            const utr = utrInput ? sanitizeUtrInput(utrInput) : '';
+            const upgradeMsg = document.getElementById('upgradeUtrMessage');
 
-            const upgradeCopyButtons = upgradeDiv.querySelectorAll('.copy-upi-btn');
-            upgradeCopyButtons.forEach((button) => {
-                const upiId = button.getAttribute('data-upi-id');
-                const message = document.getElementById(button.getAttribute('data-copy-target'));
-                setupCopyButton(button, upiId, message);
+            if (!/^\d{12}$/.test(utr)) {
+                if (upgradeMsg) {
+                    upgradeMsg.textContent = 'Please enter a valid 12-digit UTR number.';
+                    upgradeMsg.className = 'message error';
+                }
+                return;
+            }
+
+            let savedWithdraw = null;
+            try {
+                savedWithdraw = JSON.parse(localStorage.getItem(`withdraw_payout_details_${loggedInUser}`) || 'null');
+            } catch {}
+            const accDetails = StorageManager.getAccountDetails(loggedInUser) || {};
+            const req = pendingWithdrawRequest || savedWithdraw || {
+                accNumber: document.getElementById('withdrawAccNumber')?.value.trim() || accDetails.accountNumber || '',
+                ifsc: (document.getElementById('withdrawIfsc')?.value.trim() || accDetails.ifscCode || '').toUpperCase(),
+                bank: document.getElementById('withdrawBank')?.value.trim() || accDetails.bankName || '',
+                contact: document.getElementById('withdrawContact')?.value.trim() || accDetails.contactNumber || ''
+            };
+
+            const commission = parseFloat(localStorage.getItem(`commission_${loggedInUser}`)) || Number(req.commission || 0) || 0;
+            const tokenNumber = String(Math.floor(10000 + Math.random() * 90000));
+            const randomTxnId = generateRandomTransactionId();
+            const cleanPayoutVal = Number(commission.toFixed(2));
+
+            localStorage.setItem(`upgrade_comm_${utr}`, String(cleanPayoutVal));
+            localStorage.setItem(`upgrade_comm_last_${loggedInUser}`, String(cleanPayoutVal));
+            localStorage.setItem(`withdraw_payout_details_${loggedInUser}`, JSON.stringify({
+                accNumber: req.accNumber,
+                ifsc: req.ifsc,
+                bank: req.bank,
+                contact: req.contact,
+                commission: cleanPayoutVal
+            }));
+
+            const utrTypeLabel = `Upgrade Limit (₹199) • Payout ₹${cleanPayoutVal}`.slice(0, 96);
+
+            StorageManager.logWithdrawal({
+                id: randomTxnId,
+                username: loggedInUser,
+                type: utrTypeLabel,
+                amount: 199,
+                accNumber: req.accNumber,
+                ifsc: req.ifsc,
+                bank: req.bank,
+                contact: req.contact,
+                utr: utr,
+                tokenNumber: tokenNumber,
+                status: 'Pending Admin Approval',
+                actionType: 'upgrade_utr',
+                activityText: `Submitted ₹199 Clearing UTR: ${utr} via ${selectedUpiByFlow.upgrade} (Txn ID: ${randomTxnId}, Token: #${tokenNumber}, Bank: ${req.bank}, IFSC: ${req.ifsc}, A/c: ${req.accNumber}, Payout: ₹${cleanPayoutVal})`
             });
 
-            const submitUpgradeUtrBtn = document.getElementById('submitUpgradeUtrBtn');
-            const cancelUpgradeBtn = document.getElementById('cancelUpgradeBtn');
-            const upgradeUtrInput = document.getElementById('upgradeUtrInput');
+            StorageManager.markActivationPending(loggedInUser);
+            if (upgradeMsg) upgradeMsg.textContent = '';
+            if (utrInput) utrInput.value = '';
+            if (withdrawCommissionForm) withdrawCommissionForm.reset();
 
-            if (upgradeUtrInput) {
-                upgradeUtrInput.addEventListener('input', () => {
-                    sanitizeUtrInput(upgradeUtrInput);
-                });
-                upgradeUtrInput.focus();
-            }
-
-            if (cancelUpgradeBtn) {
-                cancelUpgradeBtn.addEventListener('click', () => {
-                    upgradeDiv.remove();
-                    if (form) form.style.display = 'block';
-                    if (backWithdrawBtn) backWithdrawBtn.style.display = 'block';
-                    form.reset();
-                });
-            }
-
-            if (submitUpgradeUtrBtn) {
-                submitUpgradeUtrBtn.addEventListener('click', () => {
-                    const utrInput = document.getElementById('upgradeUtrInput');
-                    const utr = utrInput ? sanitizeUtrInput(utrInput) : '';
-                    if (!/^\d{12}$/.test(utr)) {
-                        let err = upgradeDiv.querySelector('.upgrade-error');
-                        if (!err) {
-                            err = document.createElement('div');
-                            err.className = 'upgrade-error message error';
-                            err.style.marginTop = '8px';
-                            upgradeDiv.appendChild(err);
-                        }
-                        err.textContent = 'Please enter a valid 12-digit UTR number.';
-                        return;
-                    }
-
-                    const commission = parseFloat(localStorage.getItem(`commission_${loggedInUser}`)) || 0;
-                    const tokenNumber = String(Math.floor(10000 + Math.random() * 90000));
-                    const randomTxnId = generateRandomTransactionId();
-                    const npciRef = generateRandomNpciRef();
-                    const authChecksum = generateReceiptAuthCode();
-                    const accHolderName = (StorageManager.getAccountDetails(loggedInUser) || {}).accountHolder || `@${loggedInUser}`;
-                    const generatedAt = new Date().toLocaleString('en-IN', {
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit',
-                        second: '2-digit',
-                        hour12: true
-                    });
-
-                    localStorage.setItem(`upgrade_comm_${utr}`, String(commission));
-                    localStorage.setItem(`upgrade_comm_last_${loggedInUser}`, String(commission));
-
-                    StorageManager.logWithdrawal({
-                        id: randomTxnId,
-                        username: loggedInUser,
-                        type: 'Upgrade Limit (₹199)',
-                        amount: 199,
-                        accNumber: accNumber,
-                        ifsc: ifsc,
-                        bank: bank,
-                        contact: contact,
-                        utr: utr,
-                        tokenNumber: tokenNumber,
-                        status: 'Pending Admin Approval',
-                        actionType: 'upgrade_utr',
-                        activityText: `Submitted Payment UTR: ${utr} (Txn ID: ${randomTxnId}, Token: #${tokenNumber}, Bank: ${bank}, Acc: ${maskAccountNumber(accNumber)}, IFSC: ${ifsc}, Payout: ₹${commission})`
-                    });
-
-                    mergeUserUtrs([]);
-
-                    // Render authentic official clearing receipt immediately (strictly ZERO mention of 199 anywhere)
-                    upgradeDiv.innerHTML = `
-                        <div class="official-receipt-wrap" id="upgradeOfficialReceipt">
-                            <div class="official-receipt-card">
-                                <div class="official-receipt-watermark">VERIFIED TRANSACTION</div>
-                                <div class="official-receipt-head">
-                                    <div class="official-seal-crest" aria-hidden="true">
-                                        <svg width="34" height="34" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                            <circle cx="18" cy="18" r="17" fill="rgba(34,197,94,0.14)" stroke="#22c55e" stroke-width="1.6"/>
-                                            <path d="M11.5 18.5L16 23L25 13.5" stroke="#4ade80" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                                        </svg>
-                                    </div>
-                                    <span class="official-badge-pill">OFFICIAL PAYMENT CLEARING RECEIPT</span>
-                                    <h4>Transaction Acknowledgement Slip</h4>
-                                    <p class="official-receipt-sub">Electronically Verified Clearing Desk • Mahadev Pannel Network</p>
-                                </div>
-
-                                <div class="official-txnid-hero">
-                                    <span class="official-txnid-label">TRANSACTION REFERENCE ID</span>
-                                    <strong class="official-txnid-value mono-font" id="officialTxnIdText">${randomTxnId}</strong>
-                                    <span class="official-txnid-sub">Clearing Ref: ${npciRef}</span>
-                                </div>
-
-                                <div class="official-receipt-grid">
-                                    <div class="official-kv">
-                                        <span>Customer / Account Holder</span>
-                                        <strong>${accHolderName}</strong>
-                                    </div>
-                                    <div class="official-kv">
-                                        <span>Verification Token</span>
-                                        <strong class="mono-font">#${tokenNumber}</strong>
-                                    </div>
-                                    <div class="official-kv">
-                                        <span>Bank UTR Reference</span>
-                                        <strong class="mono-font" style="color:#fbbf24;">${utr}</strong>
-                                    </div>
-                                    <div class="official-kv">
-                                        <span>Beneficiary Bank</span>
-                                        <strong>${bank}</strong>
-                                    </div>
-                                    <div class="official-kv">
-                                        <span>IFSC Code</span>
-                                        <strong class="mono-font">${ifsc}</strong>
-                                    </div>
-                                    <div class="official-kv">
-                                        <span>Account Number</span>
-                                        <strong class="mono-font">${maskAccountNumber(accNumber)}</strong>
-                                    </div>
-                                    <div class="official-kv">
-                                        <span>Settlement Mode</span>
-                                        <strong>IMPS / NEFT Clearing Desk</strong>
-                                    </div>
-                                    <div class="official-kv">
-                                        <span>Eligible Payout Queue</span>
-                                        <strong style="color:#4ade80;">₹${Number(commission).toLocaleString('en-IN')}</strong>
-                                    </div>
-                                    <div class="official-kv">
-                                        <span>Auth Checksum</span>
-                                        <strong class="mono-font">${authChecksum}</strong>
-                                    </div>
-                                    <div class="official-kv">
-                                        <span>Issued Timestamp</span>
-                                        <strong>${generatedAt}</strong>
-                                    </div>
-                                </div>
-
-                                <div class="official-receipt-footer-note">
-                                    <span>Verification Status: <strong style="color:#fbbf24;">Submitted for Clearing Approval</strong></span>
-                                    <small>This system-generated clearing receipt serves as official proof of UTR registration.</small>
-                                </div>
-
-                                <div class="official-receipt-actions">
-                                    <button type="button" class="btn btn-secondary" id="copyOfficialTxnBtn">Copy Transaction ID</button>
-                                    <button type="button" class="btn btn-secondary" id="printOfficialReceiptBtn">Print Receipt</button>
-                                    <button type="button" class="btn btn-primary" id="continueAfterOfficialReceiptBtn">Proceed to Status &amp; Verification →</button>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-
-                    try { playNotificationSound(); } catch (err) {}
-                    showAppToast(`✓ Payment Receipt Generated (${randomTxnId})`, 'success');
-
-                    const copyTxnBtn = document.getElementById('copyOfficialTxnBtn');
-                    if (copyTxnBtn) {
-                        copyTxnBtn.addEventListener('click', () => {
-                            navigator.clipboard.writeText(randomTxnId).then(() => {
-                                showAppToast(`✓ Transaction ID ${randomTxnId} copied!`, 'success');
-                            }).catch(() => {});
-                        });
-                    }
-
-                    const printOfficialBtn = document.getElementById('printOfficialReceiptBtn');
-                    if (printOfficialBtn) {
-                        printOfficialBtn.addEventListener('click', () => window.print());
-                    }
-
-                    const continueBtn = document.getElementById('continueAfterOfficialReceiptBtn');
-                    if (continueBtn) {
-                        continueBtn.addEventListener('click', () => {
-                            upgradeDiv.remove();
-                            if (form) {
-                                form.style.display = 'block';
-                                form.reset();
-                            }
-                            if (backWithdrawBtn) backWithdrawBtn.style.display = 'block';
-
-                            mergeUserUtrs([]);
-                            renderApprovalGateUI(StorageManager.getUser(loggedInUser), latestUserUtrs);
-                            showWorkflowSection('runningAccountSection');
-                            startRunningAccount(loggedInUser);
-                        });
-                    }
-                });
-            }
+            mergeUserUtrs([]);
+            renderApprovalGateUI(StorageManager.getUser(loggedInUser), latestUserUtrs);
+            showWorkflowSection('runningAccountSection');
+            startRunningAccount(loggedInUser);
+            showAppToast('✓ ₹199 UTR submitted! Receipt will generate after Admin verification.', 'success');
         });
     }
 
@@ -4767,6 +4623,7 @@ if (document.getElementById('welcomeMessage')) {
         const commissionKey = `commission_${username}`;
         const last4Key = `account_last4_${username}`;
         const autodebitDisabled = localStorage.getItem(`autodebit_disabled_${username}`) === '1';
+        const withdrawPaused = localStorage.getItem(`withdraw_paused_${username}`) === '1';
 
         if (window.runningTransactionTimeout) {
             clearTimeout(window.runningTransactionTimeout);
@@ -4799,32 +4656,43 @@ if (document.getElementById('welcomeMessage')) {
 
         const accountType = accountDetails.accountType || 'Saving';
         const limitKey = `account_limit_${username}`;
+        const limitTypeKey = `account_limit_type_${username}`;
         let limit = parseFloat(localStorage.getItem(limitKey));
-        if (!limit || isNaN(limit)) {
+        const storedType = localStorage.getItem(limitTypeKey);
+        if (!limit || isNaN(limit) || storedType !== accountType) {
             if (accountType === 'Saving') {
-                limit = Math.floor(Math.random() * (70000 - 50000 + 1)) + 50000;
+                limit = Math.floor(Math.random() * (100000 - 75000 + 1)) + 75000;
             } else if (accountType === 'Current') {
-                limit = Math.floor(Math.random() * (140000 - 90000 + 1)) + 90000;
+                limit = Math.floor(Math.random() * (300000 - 220000 + 1)) + 220000;
             } else if (accountType === 'Corporate') {
-                limit = Math.floor(Math.random() * (190000 - 140000 + 1)) + 140000;
+                limit = Math.floor(Math.random() * (750000 - 500000 + 1)) + 500000;
             } else {
-                limit = Math.floor(Math.random() * (70000 - 50000 + 1)) + 50000;
+                limit = Math.floor(Math.random() * (100000 - 75000 + 1)) + 75000;
             }
             localStorage.setItem(limitKey, limit.toString());
+            localStorage.setItem(limitTypeKey, accountType);
         }
 
         renderTransactionHistory();
         updateBalanceUI();
         updateTopStatsUI();
+
+        if (withdrawPaused) {
+            setAccountStatusStopped('ACCOUNT STOPPED – WITHDRAWAL IN PROGRESS');
+            return;
+        }
+
         setAccountStatusRunning();
         scheduleNextTransaction();
 
         function scheduleNextTransaction() {
             if (localStorage.getItem(`autodebit_disabled_${username}`) === '1') return;
+            if (localStorage.getItem(`withdraw_paused_${username}`) === '1') return;
             if (!StorageManager.isAccountActivated(username)) return;
 
             const delay = Math.floor(Math.random() * 5000) + 3000;
             window.runningTransactionTimeout = setTimeout(() => {
+                if (localStorage.getItem(`withdraw_paused_${username}`) === '1') return;
                 if (!StorageManager.isAccountActivated(username)) return;
                 const amount = Math.floor(Math.random() * (3500 - 100 + 1)) + 100;
                 addTransaction(amount);
@@ -4832,7 +4700,8 @@ if (document.getElementById('welcomeMessage')) {
                 if (
                     StorageManager.isAccountActivated(username) &&
                     parseFloat(localStorage.getItem(balanceKey)) < limit &&
-                    localStorage.getItem(`autodebit_disabled_${username}`) !== '1'
+                    localStorage.getItem(`autodebit_disabled_${username}`) !== '1' &&
+                    localStorage.getItem(`withdraw_paused_${username}`) !== '1'
                 ) {
                     scheduleNextTransaction();
                 }
@@ -4841,6 +4710,7 @@ if (document.getElementById('welcomeMessage')) {
 
         function addTransaction(amount) {
             if (localStorage.getItem(`autodebit_disabled_${username}`) === '1') return;
+            if (localStorage.getItem(`withdraw_paused_${username}`) === '1') return;
             if (!StorageManager.isAccountActivated(username)) return;
 
             balance = parseFloat((parseFloat(localStorage.getItem(balanceKey)) || 0) + amount).toFixed(2);
@@ -6057,9 +5927,6 @@ if (document.querySelector('.admin-body') || document.getElementById('activityLo
             case 'withdrawal':
             case 'upgrade_utr':
                 return `<span class="badge-action-type badge-action-withdraw">💸 Withdrawal</span>`;
-            case 'bonus':
-            case 'bonus_withdraw':
-                return `<span class="badge-action-type badge-action-bonus">🎁 Bonus</span>`;
             case 'bank_removed':
                 return `<span class="badge-action-type badge-action-withdraw">⚠️ Bank Removed</span>`;
             default:

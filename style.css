@@ -1,20 +1,22 @@
 /* =====================================================
-   MAHADEV PANNEL — MOBILE BANKING & ROYAL PANEL THEME
-   Obsidian (#07090F) • Brushed Gold (#F59E0B) • Emerald (#10B981)
+   MAHADEV PANNEL — ROYAL OBSIDIAN & LUMINOUS GOLD THEME
+   Pure Obsidian (#05070D) • Luminous Gold (#FBBF24) • Emerald (#10B981)
    ===================================================== */
 
 :root {
-    --bg-obsidian: #07090F;
-    --bg-surface: #0E131E;
-    --bg-elevated: #141C2B;
-    --bg-card: rgba(17, 23, 36, 0.96);
-    --bg-input: #0A0F18;
+    --bg-obsidian: #05070D;
+    --bg-surface: #0A0E17;
+    --bg-elevated: #111827;
+    --bg-card: rgba(9, 13, 22, 0.94);
+    --bg-input: #070B12;
 
     --gold-primary: #F59E0B;
     --gold-bright: #FBBF24;
-    --gold-deep: #D97706;
-    --gold-soft: rgba(245, 158, 11, 0.14);
-    --gold-border: rgba(245, 158, 11, 0.34);
+    --gold-champagne: #FEF08A;
+    --gold-deep: #B45309;
+    --gold-soft: rgba(251, 191, 36, 0.14);
+    --gold-border: rgba(251, 191, 36, 0.44);
+    --gold-glow: rgba(245, 158, 11, 0.28);
 
     --primary-color: #F59E0B;
     --secondary-color: #FBBF24;
@@ -26,16 +28,18 @@
     --text-secondary: #94A3B8;
     --text-muted: #64748B;
 
-    --border-subtle: rgba(255, 255, 255, 0.08);
-    --border-strong: rgba(255, 255, 255, 0.14);
+    --border-subtle: rgba(251, 191, 36, 0.16);
+    --border-strong: rgba(251, 191, 36, 0.32);
 
     --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-display: 'Cinzel', Georgia, serif;
+    --font-script: 'Cormorant Garamond', Georgia, serif;
     --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
     --radius-sm: 10px;
     --radius-md: 16px;
     --radius-lg: 22px;
-    --shadow-card: 0 18px 40px rgba(0, 0, 0, 0.48);
+    --shadow-card: 0 18px 44px rgba(0, 0, 0, 0.62), 0 0 24px rgba(245, 158, 11, 0.08);
 }
 
 *, *::before, *::after {
@@ -53,8 +57,9 @@ body {
     font-family: var(--font-sans);
     background-color: var(--bg-obsidian);
     background-image:
-        radial-gradient(circle at 12% 8%, rgba(245, 158, 11, 0.09) 0%, transparent 42%),
-        radial-gradient(circle at 88% 18%, rgba(16, 185, 129, 0.06) 0%, transparent 38%);
+        radial-gradient(circle at 50% 0%, rgba(251, 191, 36, 0.12) 0%, transparent 45%),
+        radial-gradient(circle at 12% 30%, rgba(245, 158, 11, 0.06) 0%, transparent 38%),
+        radial-gradient(circle at 88% 85%, rgba(245, 158, 11, 0.08) 0%, transparent 40%);
     color: var(--text-primary);
     min-height: 100vh;
     line-height: 1.45;
@@ -79,22 +84,24 @@ body {
 }
 
 /* =====================================================
-   COMPACT STICKY APP TOP BAR (52px HEIGHT)
+   COMPACT STICKY APP TOP BAR (50px HEIGHT)
    ===================================================== */
 
-.mp-topbar {
+.mp-topbar,
+.mp-royal-topbar {
     position: sticky;
     top: 0;
     z-index: 90;
-    height: 54px;
-    background: rgba(7, 9, 15, 0.9);
+    height: 50px;
+    background: rgba(5, 7, 13, 0.88);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: 1px solid rgba(251, 191, 36, 0.24);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
 }
 
 .mp-topbar-inner {
-    max-width: 720px;
+    max-width: 740px;
     height: 100%;
     margin: 0 auto;
     padding: 0 14px;
@@ -105,7 +112,7 @@ body {
 }
 
 .mp-auth-body .mp-topbar-inner {
-    max-width: 480px;
+    max-width: 490px;
 }
 
 .mp-brand {
@@ -116,12 +123,12 @@ body {
 }
 
 .mp-back-icon-btn {
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
     border-radius: 10px;
-    border: 1px solid var(--border-subtle);
-    background: var(--bg-elevated);
-    color: var(--text-primary);
+    border: 1px solid rgba(251, 191, 36, 0.28);
+    background: rgba(17, 24, 39, 0.9);
+    color: var(--gold-champagne);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -131,22 +138,22 @@ body {
 }
 
 .mp-back-icon-btn:hover {
-    border-color: var(--gold-border);
-    background: rgba(245, 158, 11, 0.12);
+    border-color: var(--gold-bright);
+    background: rgba(245, 158, 11, 0.16);
 }
 
 .mp-logo-frame {
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
     overflow: hidden;
-    border: 1px solid var(--gold-border);
-    background: #0c1018;
+    border: 1px solid rgba(251, 191, 36, 0.6);
+    background: #090d16;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    box-shadow: 0 0 16px rgba(245, 158, 11, 0.18);
+    box-shadow: 0 0 14px rgba(245, 158, 11, 0.28);
 }
 
 .mp-logo-img {
@@ -162,21 +169,45 @@ body {
     min-width: 0;
 }
 
+.mp-brand-title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
 .mp-brand-name {
-    font-size: 0.94rem;
+    font-family: var(--font-display);
+    font-size: 0.92rem;
     font-weight: 800;
-    letter-spacing: 0.06em;
-    color: var(--text-primary);
+    letter-spacing: 0.08em;
+    background: linear-gradient(180deg, #FFFBEB 0%, #FDE68A 48%, #F59E0B 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
     line-height: 1.15;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
+.mp-pure-fund-pill {
+    padding: 2px 6px;
+    border-radius: 5px;
+    background: rgba(16, 185, 129, 0.16);
+    border: 1px solid rgba(16, 185, 129, 0.42);
+    color: #34D399;
+    font-size: 0.54rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 .mp-brand-sub {
-    font-size: 0.64rem;
+    font-size: 0.6rem;
     font-weight: 700;
-    letter-spacing: 0.09em;
+    letter-spacing: 0.11em;
     color: var(--gold-bright);
     text-transform: uppercase;
     white-space: nowrap;
@@ -195,29 +226,30 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    height: 36px;
+    height: 34px;
     padding: 0 12px;
-    border-radius: 10px;
-    background: rgba(245, 158, 11, 0.12);
-    border: 1px solid var(--gold-border);
-    color: var(--gold-bright);
-    font-size: 0.78rem;
+    border-radius: 999px;
+    background: rgba(245, 158, 11, 0.14);
+    border: 1px solid rgba(251, 191, 36, 0.45);
+    color: var(--gold-champagne);
+    font-size: 0.76rem;
     font-weight: 700;
     text-decoration: none;
     white-space: nowrap;
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
     transition: background 0.2s, transform 0.15s;
 }
 
 .mp-support-btn:hover {
-    background: rgba(245, 158, 11, 0.22);
+    background: rgba(245, 158, 11, 0.26);
 }
 
 .mp-icon-action {
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
     border-radius: 10px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-subtle);
+    background: rgba(17, 24, 39, 0.9);
+    border: 1px solid rgba(251, 191, 36, 0.28);
     color: #38BDF8;
     display: inline-flex;
     align-items: center;
@@ -227,46 +259,17 @@ body {
 }
 
 .mp-icon-action:hover {
-    border-color: rgba(56, 189, 248, 0.45);
-}
-
-.mp-bonus-chip {
-    position: relative;
-    height: 36px;
-    padding: 0 10px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.14));
-    border: 1px solid var(--gold-border);
-    color: var(--gold-bright);
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    font-weight: 700;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.bonus-badge {
-    position: absolute;
-    top: -3px;
-    right: -3px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--success-color);
-    box-shadow: 0 0 8px var(--success-color);
+    border-color: rgba(56, 189, 248, 0.55);
 }
 
 .mp-logout-btn {
-    height: 36px;
+    height: 34px;
     padding: 0 12px;
-    border-radius: 10px;
+    border-radius: 999px;
     background: rgba(239, 68, 68, 0.12);
-    border: 1px solid rgba(239, 68, 68, 0.32);
+    border: 1px solid rgba(239, 68, 68, 0.34);
     color: #FCA5A5;
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
@@ -278,162 +281,299 @@ body {
 }
 
 /* =====================================================
-   AUTH SHELL (MOBILE-APP FRAME)
+   ROYAL AUTH SHELL & SHIVA HERO BANNER
    ===================================================== */
 
-.mp-auth-shell {
-    max-width: 480px;
+.mp-auth-shell,
+.mp-royal-shell {
+    max-width: 490px;
     margin: 0 auto;
-    padding: 16px 14px 40px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-}
-
-.mp-auth-hero {
-    position: relative;
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    border: 1px solid var(--gold-border);
-    background: #0D121D;
-    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.55);
-}
-
-.mp-auth-hero-bg {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    opacity: 0.42;
-}
-
-.mp-auth-hero-scrim {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(155deg, rgba(7, 9, 15, 0.72) 0%, rgba(12, 17, 29, 0.94) 100%);
-}
-
-.mp-auth-hero-content {
-    position: relative;
-    z-index: 1;
-    padding: 20px 18px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-.mp-hero-emblem-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-}
-
-.mp-hero-crest {
-    width: 56px;
-    height: 56px;
-    border-radius: 16px;
-    overflow: hidden;
-    border: 1.5px solid var(--gold-bright);
-    box-shadow: 0 8px 24px rgba(245, 158, 11, 0.28);
-    flex-shrink: 0;
-    background: #080b12;
-}
-
-.mp-hero-crest img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-
-.mp-hero-kicker {
-    display: block;
-    font-size: 0.66rem;
-    font-weight: 700;
-    letter-spacing: 0.14em;
-    color: var(--gold-bright);
-    margin-bottom: 3px;
-}
-
-.mp-hero-title {
-    font-size: 1.48rem;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-    color: #FFFFFF;
-    line-height: 1.1;
-}
-
-.mp-hero-metrics {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 12px;
-    border-radius: 12px;
-    background: rgba(7, 9, 15, 0.72);
-    border: 1px solid var(--border-subtle);
-}
-
-.mp-hero-metric {
-    flex: 1;
-    text-align: center;
-}
-
-.mp-hm-val {
-    display: block;
-    font-family: var(--font-mono);
-    font-size: 0.96rem;
-    font-weight: 700;
-    color: var(--gold-bright);
-}
-
-.mp-hm-lbl {
-    display: block;
-    font-size: 0.68rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-}
-
-.mp-hero-metric-sep {
-    width: 1px;
-    height: 24px;
-    background: var(--border-subtle);
-}
-
-.mp-auth-panel {
+    padding: 0 12px 26px;
     display: flex;
     flex-direction: column;
     gap: 12px;
 }
 
-.mp-segmented-tabs {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    padding: 5px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: 14px;
+.mp-shiva-hero {
+    position: relative;
+    margin: 0 -12px;
+    padding-bottom: 4px;
 }
 
-.tab-button {
-    min-height: 44px;
-    border: none;
-    border-radius: 10px;
+.mp-shiva-artwork-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9.2;
+    min-height: 205px;
+    max-height: 270px;
+    overflow: hidden;
+    background: #05070D;
+}
+
+.mp-shiva-artwork {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 20%;
+    display: block;
+    filter: contrast(1.06) saturate(1.1);
+}
+
+.mp-shiva-artwork-fade {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(180deg, rgba(5, 7, 13, 0.34) 0%, rgba(5, 7, 13, 0.04) 28%, rgba(5, 7, 13, 0.35) 66%, #05070D 100%),
+        linear-gradient(90deg, rgba(5, 7, 13, 0.35) 0%, transparent 18%, transparent 82%, rgba(5, 7, 13, 0.35) 100%);
+    pointer-events: none;
+}
+
+.mp-shiva-mantra {
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    font-family: 'Noto Serif Devanagari', Georgia, serif;
+    font-size: clamp(1rem, 3.8vw, 1.25rem);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    background: linear-gradient(180deg, #FFFBEB 0%, #FDE047 50%, #D97706 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 2px 10px rgba(245, 158, 11, 0.6));
+    pointer-events: none;
+}
+
+/* Ornate Arched Royal Plaque */
+.mp-royal-crest-banner {
+    position: relative;
+    z-index: 2;
+    margin: -34px 12px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.mp-royal-crown-orb {
+    position: relative;
+    z-index: 3;
+    margin-bottom: -10px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(245, 158, 11, 0.25) 0%, #05070D 75%);
+    filter: drop-shadow(0 0 10px rgba(251, 191, 36, 0.55));
+}
+
+.mp-royal-plaque-arch {
+    position: relative;
+    width: 100%;
+    padding: 13px 22px 16px;
+    border-radius: 999px 999px 22px 22px / 48px 48px 18px 18px;
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(251, 191, 36, 0.16) 0%, rgba(8, 11, 19, 0.96) 68%),
+        #070A12;
+    border: 1.5px solid rgba(251, 191, 36, 0.72);
+    box-shadow:
+        0 0 0 2px rgba(5, 7, 13, 0.85),
+        0 0 0 3px rgba(245, 158, 11, 0.24),
+        0 12px 32px rgba(0, 0, 0, 0.8),
+        0 0 26px rgba(245, 158, 11, 0.22);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.mp-plaque-diamond {
+    color: var(--gold-champagne);
+    font-size: 0.72rem;
+    text-shadow: 0 0 8px rgba(251, 191, 36, 0.8);
+    flex-shrink: 0;
+}
+
+.mp-royal-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.32rem, 5.4vw, 1.85rem);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1.1;
+    background: linear-gradient(180deg, #FFFFFF 0%, #FEF08A 46%, #F59E0B 85%, #B45309 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.9));
+    white-space: nowrap;
+}
+
+.mp-royal-ribbon-pill {
+    position: relative;
+    z-index: 3;
+    margin-top: -11px;
+    padding: 4px 20px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #FEF08A 0%, #F59E0B 52%, #B45309 100%);
+    border: 1px solid #FFFBEB;
+    color: #07090F;
+    font-size: 0.74rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    box-shadow: 0 4px 16px rgba(245, 158, 11, 0.42);
+}
+
+.mp-royal-tagline {
+    margin-top: 7px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    color: #E2E8F0;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+
+/* 3-Column Luminous Gold Metric Bar */
+.mp-royal-metrics-card {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    align-items: center;
+    padding: 12px 10px;
+    border-radius: 18px;
+    background:
+        radial-gradient(ellipse at 50% -20%, rgba(251, 191, 36, 0.14) 0%, transparent 65%),
+        rgba(8, 11, 19, 0.94);
+    border: 1.25px solid rgba(251, 191, 36, 0.56);
+    box-shadow:
+        0 10px 28px rgba(0, 0, 0, 0.65),
+        inset 0 1px 0 rgba(254, 240, 138, 0.35),
+        0 0 22px rgba(245, 158, 11, 0.14);
+}
+
+.mp-rm-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 2px;
+    padding: 0 4px;
+}
+
+.mp-rm-icon {
+    color: var(--gold-bright);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 2px;
+    filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.48));
+}
+
+.mp-rm-val {
+    font-family: var(--font-mono);
+    font-size: 0.98rem;
+    font-weight: 800;
+    color: #FFFFFF;
+    line-height: 1.15;
+}
+
+.mp-rm-lbl {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #CBD5E1;
+    line-height: 1.2;
+}
+
+.mp-rm-divider {
+    width: 1px;
+    height: 44px;
+    background: linear-gradient(180deg, transparent 0%, rgba(251, 191, 36, 0.55) 50%, transparent 100%);
+}
+
+/* =====================================================
+   DUAL LUMINOUS CAPSULE SWITCHER
+   ===================================================== */
+
+.mp-auth-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.mp-segmented-tabs,
+.mp-royal-capsule-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 0;
     background: transparent;
-    color: var(--text-secondary);
+    border: none;
+}
+
+.tab-button,
+.mp-capsule-btn {
+    min-height: 46px;
+    padding: 6px 8px 6px 14px;
+    border-radius: 999px;
+    border: 1.25px solid rgba(251, 191, 36, 0.52);
+    background: rgba(8, 11, 19, 0.92);
+    color: #F8FAFC;
     font-family: var(--font-sans);
-    font-size: 0.92rem;
+    font-size: 0.9rem;
     font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
-    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    box-shadow:
+        0 8px 20px rgba(0, 0, 0, 0.55),
+        inset 0 1px 0 rgba(254, 240, 138, 0.16);
+    transition: transform 0.16s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
-.tab-button.active {
-    background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+.mp-cap-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.mp-cap-left svg {
+    color: var(--gold-bright);
+    flex-shrink: 0;
+}
+
+.mp-cap-arrow {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(251, 191, 36, 0.16);
+    border: 1px solid rgba(251, 191, 36, 0.52);
+    color: var(--gold-champagne);
+    font-size: 0.85rem;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.tab-button.active,
+.mp-capsule-btn.active {
+    background: linear-gradient(180deg, #FEF08A 0%, #F59E0B 48%, #B45309 100%);
+    border-color: #FFFBEB;
     color: #07090F;
-    box-shadow: 0 6px 18px rgba(245, 158, 11, 0.28);
+    font-weight: 800;
+    box-shadow:
+        0 8px 24px rgba(245, 158, 11, 0.36),
+        inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.tab-button.active .mp-cap-left svg {
+    color: #07090F;
+}
+
+.tab-button.active .mp-cap-arrow {
+    background: #07090F;
+    border-color: #07090F;
+    color: var(--gold-champagne);
 }
 
 .tab-content {
@@ -451,7 +591,242 @@ body {
 }
 
 /* =====================================================
-   DASHBOARD MOBILE BANKING SHELL
+   ORNATE FORM CARD + OVERLAPPING GOLDEN CREST PILL
+   ===================================================== */
+
+.mp-royal-form-card {
+    position: relative;
+    margin-top: 8px;
+    padding: 36px 16px 18px !important;
+    border-radius: 22px !important;
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(251, 191, 36, 0.1) 0%, transparent 55%),
+        radial-gradient(ellipse at 50% 100%, rgba(245, 158, 11, 0.1) 0%, transparent 55%),
+        rgba(8, 11, 19, 0.94) !important;
+    border: 1.5px solid rgba(251, 191, 36, 0.62) !important;
+    box-shadow:
+        0 18px 44px rgba(0, 0, 0, 0.72),
+        0 0 28px rgba(245, 158, 11, 0.16),
+        inset 0 1px 0 rgba(254, 240, 138, 0.32) !important;
+}
+
+.mp-form-crest-header {
+    position: absolute;
+    top: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100% - 44px);
+    max-width: 310px;
+    z-index: 3;
+}
+
+.mp-form-crest-pill {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 7px 16px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #FEF08A 0%, #F59E0B 52%, #B45309 100%);
+    border: 1.5px solid #FFFBEB;
+    box-shadow:
+        0 6px 20px rgba(245, 158, 11, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.78);
+    color: #07090F;
+}
+
+.mp-crest-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #07090F;
+    flex-shrink: 0;
+}
+
+.mp-crest-text {
+    text-align: left;
+    line-height: 1.15;
+}
+
+.mp-crest-text h3 {
+    margin: 0;
+    font-size: 0.94rem;
+    font-weight: 800;
+    color: #07090F;
+}
+
+.mp-crest-text p {
+    margin: 2px 0 0;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #1E1505;
+}
+
+.mp-royal-form .mp-royal-field {
+    margin-bottom: 14px;
+}
+
+.mp-field-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+}
+
+.mp-field-medallion {
+    width: 38px;
+    height: 38px;
+    margin-bottom: 3px;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 35% 30%, rgba(254, 240, 138, 0.28), rgba(15, 20, 32, 0.95) 70%);
+    border: 1.25px solid rgba(251, 191, 36, 0.62);
+    color: var(--gold-champagne);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 0 14px rgba(245, 158, 11, 0.25);
+}
+
+.mp-field-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.mp-field-body label {
+    margin-bottom: 5px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #F8FAFC;
+}
+
+.mp-royal-form input[type="text"],
+.mp-royal-form input[type="password"],
+.mp-royal-form input[type="tel"] {
+    min-height: 44px;
+    border-radius: 12px;
+    border: 1px solid rgba(251, 191, 36, 0.28);
+    background: rgba(5, 7, 13, 0.88);
+    color: #FFFFFF;
+}
+
+.mp-royal-form input:focus {
+    border-color: var(--gold-bright);
+    box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.16);
+}
+
+.mp-pwd-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.mp-pwd-input-wrap input {
+    padding-right: 42px;
+}
+
+.mp-pwd-toggle-btn {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: color 0.18s;
+}
+
+.mp-pwd-toggle-btn:hover,
+.mp-pwd-toggle-btn.is-visible {
+    color: var(--gold-bright);
+}
+
+/* =====================================================
+   4-COLUMN TRUST FOOTER & MOUNTAIN HORIZON SIGNATURE
+   ===================================================== */
+
+.mp-royal-footer {
+    margin-top: 2px;
+    padding: 12px 4px 10px;
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(10, 14, 24, 0.55) 0%, rgba(245, 158, 11, 0.08) 100%);
+    border-top: 1px solid rgba(251, 191, 36, 0.22);
+}
+
+.mp-trust-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    margin-bottom: 14px;
+}
+
+.mp-trust-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 5px;
+    padding: 4px 2px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #E2E8F0;
+}
+
+.mp-trust-item:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 18%;
+    height: 64%;
+    width: 1px;
+    background: linear-gradient(180deg, transparent, rgba(251, 191, 36, 0.35), transparent);
+}
+
+.mp-trust-icon {
+    color: var(--gold-bright);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.45));
+}
+
+.mp-horizon-signature {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 0 12px;
+}
+
+.mp-horizon-line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(251, 191, 36, 0.65), transparent);
+}
+
+.mp-horizon-script {
+    font-family: var(--font-script);
+    font-style: italic;
+    font-size: 1.25rem;
+    font-weight: 700;
+    background: linear-gradient(180deg, #FFFBEB 0%, #FDE047 55%, #D97706 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    letter-spacing: 0.03em;
+    filter: drop-shadow(0 2px 10px rgba(245, 158, 11, 0.4));
+}
+
+/* =====================================================
+   DASHBOARD MOBILE BANKING SHELL (ROYAL GOLD HARMONY)
    ===================================================== */
 
 .mp-dash-body {
@@ -459,7 +834,7 @@ body {
 }
 
 .mp-app-container {
-    max-width: 720px;
+    max-width: 740px;
     margin: 0 auto;
     padding: 14px 14px 28px;
     display: flex;
@@ -468,13 +843,14 @@ body {
 }
 
 /* Vault Hero Balance Card */
-.mp-vault-hero {
+.mp-vault-hero,
+.mp-royal-vault-hero {
     position: relative;
     border-radius: var(--radius-lg);
     overflow: hidden;
-    border: 1px solid var(--gold-border);
-    background: #0D121D;
-    box-shadow: var(--shadow-card);
+    border: 1.5px solid rgba(251, 191, 36, 0.56);
+    background: #070A12;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.68), 0 0 24px rgba(245, 158, 11, 0.16);
 }
 
 .mp-vault-bg {
@@ -483,13 +859,15 @@ body {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    opacity: 0.36;
+    object-position: center 22%;
+    opacity: 0.34;
 }
 
-.mp-vault-scrim {
+.mp-vault-scrim,
+.mp-royal-vault-scrim {
     position: absolute;
     inset: 0;
-    background: linear-gradient(145deg, rgba(7, 9, 15, 0.72) 0%, rgba(12, 18, 30, 0.96) 100%);
+    background: linear-gradient(135deg, rgba(5, 7, 13, 0.86) 0%, rgba(9, 13, 22, 0.72) 55%, rgba(5, 7, 13, 0.94) 100%);
 }
 
 .mp-vault-inner {
@@ -513,7 +891,7 @@ body {
     font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.12em;
-    color: var(--text-secondary);
+    color: var(--gold-champagne);
     margin-bottom: 4px;
 }
 
@@ -526,16 +904,17 @@ body {
 }
 
 .mp-vault-tier-badge {
-    padding: 5px 10px;
-    border-radius: 8px;
-    background: rgba(245, 158, 11, 0.16);
-    border: 1px solid var(--gold-border);
-    color: var(--gold-bright);
+    padding: 5px 11px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #FEF08A 0%, #F59E0B 55%, #B45309 100%);
+    border: 1px solid #FFFBEB;
+    color: #07090F;
     font-family: var(--font-mono);
-    font-size: 0.7rem;
-    font-weight: 700;
+    font-size: 0.68rem;
+    font-weight: 800;
     letter-spacing: 0.08em;
     white-space: nowrap;
+    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.32);
 }
 
 .mp-vault-substats {
@@ -543,7 +922,7 @@ body {
     align-items: center;
     gap: 14px;
     padding-top: 12px;
-    border-top: 1px solid rgba(255, 255, 255, 0.09);
+    border-top: 1px solid rgba(251, 191, 36, 0.22);
 }
 
 .mp-vault-stat {
@@ -569,60 +948,65 @@ body {
 .mp-vault-stat-div {
     width: 1px;
     height: 28px;
-    background: rgba(255, 255, 255, 0.1);
+    background: linear-gradient(180deg, transparent, rgba(251, 191, 36, 0.45), transparent);
 }
 
-/* 4-Tile Quick Actions Grid */
+/* 3-Tile Quick Actions Grid */
 .mp-quick-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
     margin-bottom: 14px;
 }
 
-.mp-qa-tile {
+.mp-qa-tile,
+.mp-royal-qa-tile {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 7px;
     padding: 12px 6px;
-    min-height: 76px;
+    min-height: 78px;
     border-radius: var(--radius-md);
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-subtle);
+    background: rgba(9, 13, 22, 0.94);
+    border: 1.25px solid rgba(251, 191, 36, 0.34);
     color: var(--text-primary);
     cursor: pointer;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
     transition: transform 0.15s, border-color 0.2s, background 0.2s;
 }
 
 .mp-qa-tile:hover {
-    border-color: var(--gold-border);
-    background: #1A2438;
+    border-color: var(--gold-bright);
+    background: #131B2E;
     transform: translateY(-1px);
 }
 
 .mp-qa-icon {
     width: 38px;
     height: 38px;
-    border-radius: 12px;
+    border-radius: 50%;
+    border: 1px solid rgba(251, 191, 36, 0.45);
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
 .mp-qa-gold {
-    background: rgba(245, 158, 11, 0.16);
-    color: #FBBF24;
+    background: rgba(245, 158, 11, 0.18);
+    color: #FDE047;
 }
 
 .mp-qa-emerald {
-    background: rgba(16, 185, 129, 0.16);
+    background: rgba(16, 185, 129, 0.18);
+    border-color: rgba(16, 185, 129, 0.42);
     color: #34D399;
 }
 
 .mp-qa-amber {
-    background: rgba(56, 189, 248, 0.15);
+    background: rgba(56, 189, 248, 0.16);
+    border-color: rgba(56, 189, 248, 0.4);
     color: #38BDF8;
 }
 
@@ -641,9 +1025,12 @@ body {
 .card,
 .form-card,
 .mp-bank-card,
-.mp-app-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-subtle);
+.mp-app-card,
+.mp-royal-card {
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(251, 191, 36, 0.08) 0%, transparent 55%),
+        rgba(9, 13, 22, 0.95);
+    border: 1.25px solid rgba(251, 191, 36, 0.38);
     border-radius: var(--radius-lg);
     padding: 18px;
     box-shadow: var(--shadow-card);
@@ -769,6 +1156,10 @@ body {
     width: 100%;
 }
 
+.mp-home-cta-stack.mp-home-cta-single {
+    grid-template-columns: 1fr;
+}
+
 /* Form Elements */
 .form-group {
     margin-bottom: 13px;
@@ -832,10 +1223,10 @@ input[type="file"] {
 .country-badge {
     min-height: 44px;
     padding: 0 11px;
-    border-radius: 11px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-subtle);
-    color: var(--gold-bright);
+    border-radius: 12px;
+    background: rgba(17, 24, 39, 0.92);
+    border: 1px solid rgba(251, 191, 36, 0.34);
+    color: var(--gold-champagne);
     font-family: var(--font-mono);
     font-size: 0.86rem;
     font-weight: 700;
@@ -847,20 +1238,21 @@ input[type="file"] {
 
 .btn-otp-action {
     min-height: 44px;
-    padding: 0 14px;
-    border-radius: 11px;
-    background: rgba(245, 158, 11, 0.16);
-    border: 1px solid var(--gold-border);
-    color: var(--gold-bright);
-    font-weight: 700;
-    font-size: 0.82rem;
+    padding: 0 13px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #FEF08A 0%, #F59E0B 52%, #B45309 100%);
+    border: 1px solid #FFFBEB;
+    color: #07090F;
+    font-weight: 800;
+    font-size: 0.8rem;
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
+    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.34);
 }
 
 .btn-otp-action:hover {
-    background: rgba(245, 158, 11, 0.28);
+    filter: brightness(1.06);
 }
 
 .verified-pill {
@@ -975,14 +1367,41 @@ input[type="file"] {
     width: 100%;
 }
 
-.btn-primary {
-    background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+.btn-primary,
+.mp-royal-cta-btn {
+    background: linear-gradient(180deg, #FEF08A 0%, #F59E0B 52%, #B45309 100%);
+    border-color: rgba(255, 251, 235, 0.72);
     color: #07090F;
-    box-shadow: 0 8px 22px rgba(245, 158, 11, 0.25);
+    font-weight: 800;
+    border-radius: 999px;
+    box-shadow:
+        0 8px 24px rgba(245, 158, 11, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.75);
 }
 
 .btn-primary:hover {
     filter: brightness(1.06);
+}
+
+.mp-cta-crown {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #07090F;
+}
+
+.mp-cta-arrow {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #07090F;
+    color: var(--gold-champagne);
+    font-size: 0.85rem;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 2px;
 }
 
 .btn-success {
@@ -998,7 +1417,7 @@ input[type="file"] {
 }
 
 .btn-secondary:hover {
-    border-color: var(--gold-border);
+    border-color: var(--gold-bright);
 }
 
 .btn-danger {
@@ -1437,6 +1856,17 @@ input[type="file"] {
    UPI & ACTIVATION PANELS
    ===================================================== */
 
+.mp-charge-banner {
+    padding: 10px 12px;
+    border-radius: 11px;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid var(--gold-border);
+    color: var(--gold-bright);
+    font-size: 0.82rem;
+    font-weight: 700;
+    margin-bottom: 14px;
+}
+
 .upi-section,
 .upgrade-upi-section {
     display: flex;
@@ -1451,6 +1881,43 @@ input[type="file"] {
     border-radius: 12px;
     background: var(--bg-input);
     border: 1px solid var(--border-subtle);
+    transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
+}
+
+.upi-row.is-selectable,
+.upgrade-upi-row.is-selectable {
+    cursor: pointer;
+}
+
+.upi-row.is-selected,
+.upgrade-upi-row.is-selected {
+    border-color: var(--gold-primary);
+    background: rgba(245, 158, 11, 0.08);
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.16);
+}
+
+.upi-row-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.upi-radio-dot {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    border: 2px solid var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.is-selected .upi-radio-dot {
+    border-color: var(--gold-primary);
+    background: var(--gold-primary);
+    box-shadow: inset 0 0 0 3px #0A0F18;
 }
 
 .upi-label,
@@ -1458,7 +1925,7 @@ input[type="file"] {
     font-size: 0.72rem;
     font-weight: 700;
     color: var(--text-secondary);
-    margin-bottom: 6px;
+    margin-bottom: 0;
     display: block;
 }
 
@@ -1487,17 +1954,103 @@ input[type="file"] {
     margin-top: 6px;
 }
 
-.mp-code-display {
-    font-family: var(--font-mono);
-    font-size: 2rem;
-    font-weight: 800;
-    letter-spacing: 6px;
-    color: var(--gold-bright);
-    padding: 14px 20px;
+.upi-apps-block {
+    padding: 12px;
     border-radius: 14px;
     background: var(--bg-input);
-    border: 1px dashed var(--gold-border);
-    width: 100%;
+    border: 1px solid var(--border-subtle);
+    margin-bottom: 14px;
+}
+
+.upi-apps-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    font-size: 0.76rem;
+    color: var(--text-secondary);
+}
+
+.upi-apps-header strong {
+    color: #34D399;
+    font-size: 0.76rem;
+}
+
+.upi-app-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+@media (min-width: 560px) {
+    .upi-app-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+.upi-app-btn {
+    min-height: 44px;
+    padding: 8px 10px;
+    border-radius: 11px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: transform 0.14s, border-color 0.18s, background 0.18s;
+}
+
+.upi-app-btn:hover {
+    border-color: var(--gold-border);
+    background: #1B253B;
+    transform: translateY(-1px);
+}
+
+.upi-app-badge {
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.upi-app-phonepe .upi-app-badge {
+    background: #5F259F;
+    color: #FFFFFF;
+}
+
+.upi-app-gpay .upi-app-badge {
+    background: #1A73E8;
+    color: #FFFFFF;
+}
+
+.upi-app-paytm .upi-app-badge {
+    background: #00BAF2;
+    color: #07192D;
+}
+
+.upi-app-any .upi-app-badge {
+    background: #10B981;
+    color: #052E22;
+}
+
+.mp-upgrade-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
 }
 
 /* =====================================================
@@ -1872,85 +2425,6 @@ input[type="file"] {
 }
 
 /* =====================================================
-   BONUS PAGE & UPGRADE / RECEIPT CARDS
-   ===================================================== */
-
-.bonus-page-card {
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-}
-
-.bonus-page-title {
-    font-size: 0.72rem;
-    font-weight: 800;
-    letter-spacing: 0.14em;
-    color: var(--gold-bright);
-}
-
-.bonus-amount {
-    font-family: var(--font-mono);
-    font-size: 2.5rem;
-    font-weight: 800;
-    color: #34D399;
-}
-
-.bonus-demo-countdown {
-    width: 100%;
-    padding: 12px;
-    border-radius: 14px;
-    background: var(--bg-input);
-    border: 1px solid var(--border-subtle);
-}
-
-.bonus-countdown-expiry {
-    font-size: 0.74rem;
-    color: var(--text-secondary);
-    margin-bottom: 8px;
-}
-
-.bonus-countdown-timer {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-}
-
-.bonus-time-box {
-    min-width: 60px;
-    padding: 8px;
-    border-radius: 10px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--gold-border);
-    display: flex;
-    flex-direction: column;
-}
-
-.bonus-time-box strong {
-    font-family: var(--font-mono);
-    font-size: 1.25rem;
-    color: var(--gold-bright);
-}
-
-.bonus-time-box small {
-    font-size: 0.6rem;
-    color: var(--text-secondary);
-}
-
-.bonus-inline-message {
-    width: 100%;
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: rgba(239, 68, 68, 0.14);
-    border: 1px solid rgba(239, 68, 68, 0.35);
-    color: #FCA5A5;
-    font-size: 0.82rem;
-    font-weight: 700;
-    white-space: pre-line;
-}
-
 .upgrade-card h4 {
     font-size: 1rem;
     font-weight: 800;
@@ -1970,100 +2444,265 @@ input[type="file"] {
     gap: 8px;
 }
 
-/* Official & Verified Receipts */
-.receipt-seal-header,
-.official-receipt-head {
-    text-align: center;
+/* Official & Verified Paper Settlement Receipts */
+.verified-receipt-card {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+}
+
+.official-paper-receipt {
+    background: #FFFFFF;
+    color: #0F172A;
+    border-radius: 16px;
+    border: 1px solid #CBD5E1;
+    box-shadow: 0 20px 44px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
     margin-bottom: 14px;
+    font-family: var(--font-sans);
 }
 
-.receipt-verified-badge,
-.official-badge-pill {
-    display: inline-block;
-    padding: 4px 10px;
-    border-radius: 8px;
-    background: rgba(16, 185, 129, 0.16);
-    border: 1px solid rgba(16, 185, 129, 0.4);
-    color: #34D399;
-    font-size: 0.7rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    margin-bottom: 8px;
-}
-
-.receipt-main-title,
-.official-receipt-head h4 {
-    font-size: 1.15rem;
-    font-weight: 800;
-    color: #FFFFFF;
-}
-
-.receipt-sub-id,
-.official-receipt-sub {
-    font-size: 0.76rem;
-    color: var(--text-secondary);
-    margin-top: 4px;
-}
-
-.receipt-payout-summary {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 14px;
-}
-
-.receipt-payout-box,
-.receipt-fee-box {
-    padding: 12px;
-    border-radius: 12px;
-    background: var(--bg-input);
-    border: 1px solid var(--border-subtle);
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-
-.receipt-payout-label {
-    font-size: 0.68rem;
-    color: var(--text-secondary);
-}
-
-.receipt-payout-val {
-    font-family: var(--font-mono);
-    font-size: 1.35rem;
-    color: #34D399;
-}
-
-.receipt-payout-status,
-.receipt-fee-status {
-    font-size: 0.7rem;
-    color: var(--gold-bright);
-}
-
-.receipt-kv-list {
-    border-radius: 12px;
-    background: var(--bg-input);
-    border: 1px solid var(--border-subtle);
-    padding: 10px 12px;
-    margin-bottom: 14px;
-}
-
-.receipt-kv-row {
+.receipt-paper-topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    padding: 7px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    font-size: 0.8rem;
+    padding: 14px 16px;
+    background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+    color: #FFFFFF;
+    border-bottom: 3px solid #10B981;
 }
 
-.receipt-kv-row:last-child {
+.receipt-bank-identity {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.receipt-bank-logo-box {
+    width: 38px;
+    height: 38px;
+    border-radius: 9px;
+    background: #FFFFFF;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.receipt-bank-logo-box img,
+.receipt-bank-svg-fallback,
+.receipt-bank-svg-fallback svg {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.receipt-org-name {
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: #FCD34D;
+}
+
+.receipt-org-sub {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #E2E8F0;
+    margin-top: 1px;
+}
+
+.receipt-status-stamp-initiated {
+    flex-shrink: 0;
+    padding: 5px 9px;
+    border-radius: 6px;
+    background: rgba(16, 185, 129, 0.2);
+    border: 1.5px solid #34D399;
+    color: #6EE7B7;
+    font-size: 0.65rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+}
+
+.receipt-qr-hero {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    background: #F8FAFC;
+    border-bottom: 1px dashed #CBD5E1;
+}
+
+.receipt-qr-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 7px;
+    background: #FFFFFF;
+    border: 1.5px solid #CBD5E1;
+    border-radius: 10px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.receipt-qr-box svg {
+    width: 96px;
+    height: 96px;
+    display: block;
+}
+
+.receipt-qr-caption {
+    font-size: 0.56rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #475569;
+}
+
+.receipt-qr-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.receipt-initiated-pill {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: #DCFCE7;
+    color: #15803D;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+}
+
+.receipt-paper-amount-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #64748B;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.receipt-paper-amount {
+    font-family: var(--font-mono);
+    font-size: 1.65rem;
+    font-weight: 800;
+    color: #0F172A;
+    line-height: 1.15;
+    margin: 2px 0 4px;
+}
+
+.receipt-paper-subref {
+    font-size: 0.7rem;
+    color: #475569;
+    line-height: 1.35;
+}
+
+.receipt-paper-idline {
+    font-size: 0.68rem;
+    color: #64748B;
+    margin-top: 3px;
+}
+
+.receipt-paper-divider {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    background: #F1F5F9;
+    border-top: 1px solid #E2E8F0;
+    border-bottom: 1px solid #E2E8F0;
+}
+
+.receipt-paper-divider span {
+    font-size: 0.64rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #475569;
+}
+
+.receipt-paper-kv {
+    padding: 6px 16px;
+    background: #FFFFFF;
+}
+
+.receipt-paper-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid #F1F5F9;
+    font-size: 0.78rem;
+}
+
+.receipt-paper-row:last-child {
     border-bottom: none;
 }
 
-.receipt-kv-key {
-    color: var(--text-secondary);
+.receipt-paper-key {
+    color: #64748B;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.receipt-paper-val {
+    color: #0F172A;
+    font-weight: 700;
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
+.receipt-status-green {
+    color: #15803D;
+    font-weight: 800;
+}
+
+.receipt-paper-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: #F8FAFC;
+    border-top: 1px dashed #CBD5E1;
+}
+
+.receipt-auth-seal {
+    flex-shrink: 0;
+    padding: 6px 8px;
+    border: 1.5px solid #16A34A;
+    border-radius: 8px;
+    text-align: center;
+    background: #F0FDF4;
+}
+
+.receipt-auth-seal span {
+    display: block;
+    font-size: 0.52rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: #166534;
+}
+
+.receipt-auth-seal strong {
+    display: block;
+    font-size: 0.66rem;
+    font-weight: 900;
+    color: #15803D;
+}
+
+.receipt-paper-footer p {
+    font-size: 0.69rem;
+    color: #475569;
+    line-height: 1.4;
+    margin: 0;
 }
 
 .receipt-actions-row,
@@ -2078,92 +2717,38 @@ input[type="file"] {
     flex: 1 1 140px;
 }
 
-.official-receipt-card {
-    position: relative;
-    padding: 18px;
-    border-radius: 16px;
-    background: var(--bg-input);
-    border: 1px solid var(--gold-border);
-    overflow: hidden;
+@media (max-width: 440px) {
+    .receipt-paper-topbar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .receipt-qr-hero {
+        flex-direction: column;
+        text-align: center;
+    }
 }
 
-.official-receipt-watermark {
-    position: absolute;
-    top: 48%;
-    left: 50%;
-    transform: translate(-50%, -50%) rotate(-18deg);
-    font-size: 1.6rem;
-    font-weight: 900;
-    letter-spacing: 0.14em;
-    color: rgba(245, 158, 11, 0.05);
-    pointer-events: none;
-    white-space: nowrap;
-}
-
-.official-txnid-hero {
-    padding: 12px;
-    border-radius: 12px;
-    background: rgba(245, 158, 11, 0.08);
-    border: 1px dashed var(--gold-border);
-    text-align: center;
-    margin-bottom: 14px;
-}
-
-.official-txnid-label {
-    display: block;
-    font-size: 0.66rem;
-    font-weight: 800;
-    letter-spacing: 0.1em;
-    color: var(--gold-bright);
-}
-
-.official-txnid-value {
-    display: block;
-    font-size: 1.1rem;
-    font-weight: 800;
-    color: #FFFFFF;
-    margin: 3px 0;
-}
-
-.official-txnid-sub {
-    font-size: 0.72rem;
-    color: var(--text-secondary);
-}
-
-.official-receipt-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 12px;
-}
-
-.official-kv {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.official-kv span {
-    font-size: 0.68rem;
-    color: var(--text-secondary);
-}
-
-.official-kv strong {
-    font-size: 0.82rem;
-    color: #FFFFFF;
-    overflow-wrap: anywhere;
-}
-
-.official-receipt-footer-note {
-    padding: 10px;
-    border-radius: 10px;
-    background: rgba(245, 158, 11, 0.08);
-    border: 1px solid var(--gold-border);
-    font-size: 0.76rem;
-    color: var(--text-primary);
-    margin-bottom: 12px;
+@media print {
+    body * {
+        visibility: hidden;
+    }
+    #paymentReceiptSection,
+    #paymentReceiptSection * {
+        visibility: visible;
+    }
+    #paymentReceiptSection {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+    }
+    .receipt-actions-row {
+        display: none !important;
+    }
+    .official-paper-receipt {
+        box-shadow: none;
+        border: 1px solid #94A3B8;
+    }
 }
 
 .bottom-actions {
@@ -2193,7 +2778,7 @@ input[type="file"] {
     -webkit-backdrop-filter: blur(18px);
     border-top: 1px solid var(--border-subtle);
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .app-bottom-nav-btn {
@@ -2414,30 +2999,33 @@ input[type="file"] {
 }
 
 /* =====================================================
-   TRUECALLER IN-APP SMS PAYMENT TOAST
+   100% REAL ANDROID TRUECALLER SMART SMS BANNER
    ===================================================== */
 
 .payment-notification-container {
     position: fixed;
-    top: 12px;
+    top: 10px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 1200;
-    width: calc(100% - 24px);
-    max-width: 420px;
+    width: calc(100% - 20px);
+    max-width: 410px;
     pointer-events: none;
 }
 
 .tc-notification-card {
     pointer-events: auto;
-    background: #0F172A;
-    border: 1px solid rgba(56, 189, 248, 0.42);
+    background: #FFFFFF;
+    color: #0F172A;
+    border: 1px solid #E2E8F0;
+    border-top: 3px solid #0087FF;
     border-radius: 18px;
-    padding: 14px;
-    box-shadow: 0 22px 48px rgba(0, 0, 0, 0.7);
+    padding: 12px 14px;
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.32), 0 4px 12px rgba(0, 135, 255, 0.12);
     transform: translateY(-130%);
     opacity: 0;
-    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+    transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.24s ease;
+    font-family: var(--font-sans);
 }
 
 .tc-notification-card.tc-notif-visible {
@@ -2454,68 +3042,100 @@ input[type="file"] {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 10px;
+    margin-bottom: 9px;
 }
 
 .tc-notif-app-info {
     display: flex;
     align-items: center;
-    gap: 8px;
-}
-
-.tc-app-name-row {
-    display: flex;
-    align-items: center;
-    gap: 5px;
+    gap: 6px;
     font-size: 0.72rem;
-    font-weight: 800;
-    color: #38BDF8;
 }
 
-.tc-verified-badge {
+.tc-app-icon {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
-    color: #93C5FD;
+    justify-content: center;
+}
+
+.tc-app-name {
+    font-weight: 800;
+    color: #0087FF;
+    letter-spacing: -0.01em;
+}
+
+.tc-dot-separator {
+    color: #94A3B8;
+    font-size: 0.7rem;
+}
+
+.tc-smart-sms-pill {
+    font-size: 0.64rem;
     font-weight: 700;
+    color: #0369A1;
+    background: #E0F2FE;
+    padding: 2px 6px;
+    border-radius: 5px;
 }
 
 .tc-header-time {
-    color: var(--text-secondary);
+    color: #64748B;
+    font-weight: 600;
 }
 
 .tc-close-btn {
-    background: none;
+    background: #F1F5F9;
     border: none;
-    color: var(--text-secondary);
-    font-size: 1.2rem;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    color: #475569;
+    font-size: 1rem;
     cursor: pointer;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .tc-bank-sender-row {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-bottom: 10px;
+    margin-bottom: 9px;
 }
 
 .tc-bank-logo-wrap {
-    width: 34px;
-    height: 34px;
-    border-radius: 9px;
-    background: #FFFFFF;
-    padding: 4px;
+    position: relative;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    padding: 5px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
 }
 
-.tc-bank-logo-img {
+.tc-bank-logo-img,
+.tc-bank-logo-svg-fallback,
+.tc-bank-logo-svg-fallback svg {
     width: 100%;
     height: 100%;
     object-fit: contain;
+}
+
+.tc-verified-corner {
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    width: 15px;
+    height: 15px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .tc-bank-sender-info {
@@ -2526,112 +3146,92 @@ input[type="file"] {
 .tc-bank-name-line {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     flex-wrap: wrap;
 }
 
 .tc-bank-title {
-    font-size: 0.85rem;
+    font-size: 0.84rem;
     font-weight: 800;
-    color: #FFFFFF;
+    color: #0F172A;
 }
 
 .tc-sender-badge {
     font-family: var(--font-mono);
-    font-size: 0.66rem;
-    padding: 2px 6px;
-    border-radius: 5px;
-    background: rgba(56, 189, 248, 0.16);
-    color: #7DD3FC;
+    font-size: 0.62rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: #F1F5F9;
+    color: #475569;
+    border: 1px solid #E2E8F0;
 }
 
 .tc-bank-subtext {
+    display: block;
     font-size: 0.7rem;
-    color: var(--text-secondary);
+    font-weight: 600;
+    color: #16A34A;
+    margin-top: 1px;
 }
 
-.tc-smart-tag {
-    font-size: 0.62rem;
-    font-weight: 800;
-    padding: 3px 6px;
-    border-radius: 6px;
-    background: rgba(16, 185, 129, 0.14);
-    color: #34D399;
-}
-
-.tc-smart-bubble {
-    padding: 10px 12px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border-subtle);
-    margin-bottom: 10px;
-}
-
-.tc-amount-headline {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 6px;
-}
-
-.tc-credit-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.68rem;
-    font-weight: 800;
-    color: #34D399;
-}
-
-.tc-credit-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #10B981;
+.tc-credit-amount-badge {
+    flex-shrink: 0;
+    text-align: right;
 }
 
 .tc-amount-val {
     font-family: var(--font-mono);
-    font-size: 1.25rem;
+    font-size: 1.05rem;
     font-weight: 800;
-    color: #34D399;
+    color: #15803D;
+    background: #DCFCE7;
+    padding: 4px 8px;
+    border-radius: 8px;
+    display: inline-block;
+}
+
+.tc-smart-bubble {
+    padding: 10px 11px;
+    border-radius: 12px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    margin-bottom: 9px;
 }
 
 .tc-sms-body {
-    font-size: 0.76rem;
-    color: #E2E8F0;
+    font-size: 0.75rem;
+    color: #1E293B;
     line-height: 1.45;
     margin-bottom: 8px;
 }
 
 .tc-utr-code {
     font-family: var(--font-mono);
-    color: var(--gold-bright);
+    font-weight: 700;
+    color: #0369A1;
 }
 
 .tc-details-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 6px;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
     padding-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    border-top: 1px solid #E2E8F0;
 }
 
 .tc-detail-lbl {
     display: block;
     font-size: 0.62rem;
-    color: var(--text-secondary);
+    font-weight: 600;
+    color: #64748B;
 }
 
 .tc-detail-val {
     font-family: var(--font-mono);
     font-size: 0.72rem;
     font-weight: 700;
-    color: #FFFFFF;
-}
-
-.tc-bal-val {
-    color: #34D399;
+    color: #0F172A;
 }
 
 .tc-quick-actions {
@@ -2641,24 +3241,24 @@ input[type="file"] {
 }
 
 .tc-action-btn {
-    min-height: 34px;
+    min-height: 32px;
     border-radius: 8px;
-    border: 1px solid var(--border-subtle);
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-    font-size: 0.72rem;
+    border: 1px solid #E2E8F0;
+    background: #F8FAFC;
+    color: #334155;
+    font-size: 0.71rem;
     font-weight: 700;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 5px;
+    gap: 4px;
     cursor: pointer;
 }
 
 .tc-action-primary {
-    background: rgba(56, 189, 248, 0.16);
-    border-color: rgba(56, 189, 248, 0.36);
-    color: #7DD3FC;
+    background: #E0F2FE;
+    border-color: #BAE6FD;
+    color: #0284C7;
 }
 
 /* App & Admin Floating Toast */
@@ -3372,3 +3972,60 @@ input[type="file"] {
         letter-spacing: 0.08em;
     }
 }
+
+@media (max-width: 420px) {
+    .mp-royal-crest-banner {
+        margin: -30px 6px 0;
+    }
+    .mp-royal-plaque-arch {
+        padding: 12px 14px 15px;
+        gap: 6px;
+    }
+    .mp-capsule-btn {
+        padding: 6px 6px 6px 11px;
+        font-size: 0.84rem;
+    }
+    .mp-field-row {
+        gap: 8px;
+    }
+    .mp-field-medallion {
+        width: 32px;
+        height: 32px;
+    }
+    .mp-royal-mobile-group {
+        gap: 5px;
+    }
+    .mp-royal-country {
+        padding: 0 8px;
+        font-size: 0.8rem;
+    }
+    .mp-royal-otp-btn {
+        padding: 0 10px;
+        font-size: 0.75rem;
+    }
+    .mp-royal-otp-btn svg {
+        display: none;
+    }
+    .mp-trust-item {
+        font-size: 0.62rem;
+    }
+}
+
+@media (min-width: 768px) {
+    .mp-auth-shell,
+    .mp-royal-shell {
+        padding-top: 12px;
+        padding-bottom: 36px;
+    }
+    .mp-shiva-hero {
+        margin: 0;
+        border-radius: 24px 24px 0 0;
+        overflow: visible;
+    }
+    .mp-shiva-artwork-wrap {
+        border-radius: 24px;
+        border: 1px solid rgba(251, 191, 36, 0.34);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.7);
+    }
+}
+

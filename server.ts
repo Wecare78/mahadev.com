@@ -235,7 +235,7 @@ function isAdminTokenValid(req: Request): boolean {
   return db.adminTokens.includes(token);
 }
 
-// Known IFSC prefix dictionary for fast auto-detect
+// Known IFSC prefix dictionary for fast auto-detect across all major Indian banks
 const IFSC_DICTIONARY: Record<string, { bank: string; branch: string }> = {
   SBIN: { bank: 'State Bank of India', branch: 'Main Branch' },
   HDFC: { bank: 'HDFC Bank', branch: 'Retail Operations Branch' },
@@ -259,9 +259,35 @@ const IFSC_DICTIONARY: Record<string, { bank: string; branch: string }> = {
   AIRP: { bank: 'Airtel Payments Bank', branch: 'Digital Operations' },
   PYTM: { bank: 'Paytm Payments Bank', branch: 'Noida Center' },
   IPOS: { bank: 'India Post Payments Bank', branch: 'GPO New Delhi' },
+  FINO: { bank: 'Fino Payments Bank', branch: 'Navi Mumbai Central' },
+  JIOP: { bank: 'Jio Payments Bank', branch: 'Mumbai Central' },
+  NSPB: { bank: 'NSDL Payments Bank', branch: 'Mumbai Central' },
   JAKA: { bank: 'Jammu & Kashmir Bank', branch: 'Srinagar Main Branch' },
   FDRL: { bank: 'Federal Bank', branch: 'Commercial Branch' },
   BDBL: { bank: 'Bandhan Bank', branch: 'Kolkata Main Branch' },
+  RATN: { bank: 'RBL Bank', branch: 'Operations Branch' },
+  RBLN: { bank: 'RBL Bank', branch: 'Operations Branch' },
+  AUBL: { bank: 'AU Small Finance Bank', branch: 'Jaipur Main Branch' },
+  ESFB: { bank: 'Equitas Small Finance Bank', branch: 'Chennai Main Branch' },
+  UJVN: { bank: 'Ujjivan Small Finance Bank', branch: 'Bengaluru Main Branch' },
+  JSFB: { bank: 'Jana Small Finance Bank', branch: 'Bengaluru Branch' },
+  SURY: { bank: 'Suryoday Small Finance Bank', branch: 'Navi Mumbai Branch' },
+  UTKS: { bank: 'Utkarsh Small Finance Bank', branch: 'Varanasi Main Branch' },
+  KARB: { bank: 'Karnataka Bank', branch: 'Mangaluru Branch' },
+  KVBL: { bank: 'Karur Vysya Bank', branch: 'Karur Central Branch' },
+  SIBL: { bank: 'South Indian Bank', branch: 'Thrissur City Branch' },
+  CSBK: { bank: 'CSB Bank', branch: 'Thrissur Main Branch' },
+  DCBL: { bank: 'DCB Bank', branch: 'Commercial Branch' },
+  TMBL: { bank: 'Tamilnad Mercantile Bank', branch: 'Thoothukudi Main Branch' },
+  CIUB: { bank: 'City Union Bank', branch: 'Kumbakonam Branch' },
+  DLXB: { bank: 'Dhanlaxmi Bank', branch: 'Thrissur Branch' },
+  KLGB: { bank: 'Kerala Gramin Bank', branch: 'Malappuram Branch' },
+  APGV: { bank: 'Andhra Pradesh Grameena Vikas Bank', branch: 'Warangal Branch' },
+  BUPB: { bank: 'Baroda UP Bank', branch: 'Gorakhpur Main Branch' },
+  CITI: { bank: 'Citibank India', branch: 'Mumbai Corporate' },
+  SCBL: { bank: 'Standard Chartered Bank', branch: 'Fort Mumbai Branch' },
+  HSBC: { bank: 'HSBC Bank India', branch: 'Fort Mumbai Branch' },
+  DBSS: { bank: 'DBS Bank India', branch: 'Nariman Point Branch' },
 };
 
 async function startServer() {
@@ -491,11 +517,6 @@ async function startServer() {
       return res.status(409).json({ success: false, message: 'Username already taken! Please choose another.' });
     }
 
-    const existingWithMobile = Object.values(db.users).find((u) => u && cleanMobile && u.mobile === cleanMobile);
-    if (existingWithMobile) {
-      return res.status(409).json({ success: false, message: 'This mobile number is already registered! Please login.' });
-    }
-
     const now = new Date().toISOString();
     const newUser: UserRecord = {
       username: uname,
@@ -537,11 +558,12 @@ async function startServer() {
     if (db.users[cleanIdentifier]) {
       matchedUsername = cleanIdentifier;
     } else if (cleanDigits) {
-      for (const [uname, u] of Object.entries(db.users)) {
-        if (u && (u.mobile === cleanDigits || u.accountDetails?.contactNumber === cleanDigits)) {
-          matchedUsername = uname;
-          break;
-        }
+      const mobileMatches = Object.entries(db.users)
+        .filter(([, u]) => u && (u.mobile === cleanDigits || u.accountDetails?.contactNumber === cleanDigits))
+        .sort(([, a], [, b]) => new Date(b.registeredAt || 0).getTime() - new Date(a.registeredAt || 0).getTime());
+      if (mobileMatches.length > 0) {
+        const pwMatch = mobileMatches.find(([, u]) => u.password === pwd);
+        matchedUsername = (pwMatch || mobileMatches[0])[0];
       }
     }
 

