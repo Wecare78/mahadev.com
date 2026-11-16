@@ -892,7 +892,9 @@ const FirebaseStore = {
   async recordTransaction(payload: {
     username: string;
     amount: number;
+    type?: 'credit' | 'debit' | 'payout';
     timestamp: string;
+    utrRef?: string;
     balance: number;
     commission: number;
     smsRecord?: { id?: string; bankName?: string; senderCode?: string; accountNumber?: string };
@@ -900,10 +902,21 @@ const FirebaseStore = {
     const uname = String(payload.username || '').trim();
     if (!uname || uname === 'demo') return false;
 
+    const txType: 'credit' | 'debit' | 'payout' =
+      payload.type === 'debit' ? 'debit' : (payload.type === 'payout' ? 'payout' : 'credit');
+    const amt = Number(payload.amount || 0);
+    const ts = payload.timestamp || new Date().toISOString();
+
     const existingUser = await findUserByIdentifier(uname);
     if (existingUser) {
       const nextTxns = Array.isArray(existingUser.transactions) ? [...existingUser.transactions] : [];
-      nextTxns.push({ amount: Number(payload.amount || 0), timestamp: payload.timestamp || new Date().toISOString() });
+      const txItem: { amount: number; type: 'credit' | 'debit' | 'payout'; timestamp: string; utrRef?: string } = {
+        amount: amt,
+        type: txType,
+        timestamp: ts,
+      };
+      if (payload.utrRef) txItem.utrRef = String(payload.utrRef).slice(0, 32);
+      nextTxns.push(txItem);
       if (nextTxns.length > 200) nextTxns.splice(0, nextTxns.length - 200);
 
       try {
@@ -921,14 +934,15 @@ const FirebaseStore = {
 
     if (payload.smsRecord) {
       const smsId = (payload.smsRecord.id || makeSafeId('SMS')).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 120);
+      const defaultSender = txType === 'debit' ? 'BANK-DR' : (txType === 'payout' ? 'PAYOUT-CR' : 'VM-BANK');
       const smsEntry: SmsLogRecord = {
         id: smsId,
         username: uname,
         bankName: String(payload.smsRecord.bankName || existingUser?.accountDetails?.bankName || 'Linked Bank').slice(0, 120),
-        senderCode: String(payload.smsRecord.senderCode || 'VM-BANK').slice(0, 32),
-        amount: Number(payload.amount || 0),
+        senderCode: String(payload.smsRecord.senderCode || defaultSender).slice(0, 32),
+        amount: amt,
         accountNumber: String(payload.smsRecord.accountNumber || existingUser?.accountDetails?.accountNumber || '').slice(0, 32),
-        timestamp: payload.timestamp || new Date().toISOString(),
+        timestamp: ts,
       };
       try {
         await setDoc(doc(db, 'smsLogs', smsId), smsEntry);
@@ -941,11 +955,17 @@ const FirebaseStore = {
 
     const acc = existingUser?.accountDetails;
     const last4 = String(acc?.accountNumber || '0000').slice(-4).padStart(4, '0');
+    const actionType = txType === 'debit' ? 'debit_transaction' : (txType === 'payout' ? 'payout_transaction' : 'credit_transaction');
+    const actionDetails = txType === 'debit'
+      ? `Auto-debited ₹${amt.toLocaleString('en-IN')} from ${acc?.bankName || 'Linked Bank'} (XXXX${last4})`
+      : (txType === 'payout'
+        ? `Commission Payout Credited ₹${amt.toLocaleString('en-IN')} to ${acc?.bankName || 'Linked Bank'} (XXXX${last4})${payload.utrRef ? ` • UTR ${payload.utrRef}` : ''}`
+        : `Auto-credited ₹${amt.toLocaleString('en-IN')} to ${acc?.bankName || 'Linked Bank'} (XXXX${last4})`);
     await writeActivityLog(
       uname,
-      'credit_transaction',
-      `Auto-credited ₹${Number(payload.amount || 0).toLocaleString('en-IN')} to ${acc?.bankName || 'Linked Bank'} (XXXX${last4})`,
-      'credit',
+      actionType,
+      actionDetails,
+      txType,
       'success'
     );
     return true;

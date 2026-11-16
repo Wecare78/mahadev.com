@@ -35,7 +35,9 @@ interface AutodebitDetails {
 
 interface TxnRecord {
   amount: number;
+  type?: 'credit' | 'debit' | 'payout';
   timestamp: string;
+  utrRef?: string;
 }
 
 interface UserRecord {
@@ -756,23 +758,31 @@ async function startServer() {
   });
 
   app.post('/api/users/transaction', (req: Request, res: Response) => {
-    const { username, amount, timestamp, balance, commission, smsRecord } = req.body || {};
+    const { username, amount, type, timestamp, utrRef, balance, commission, smsRecord } = req.body || {};
     const uname = String(username || '').trim();
     if (!uname || uname === 'demo') return res.status(400).json({ success: false });
 
+    const txType: 'credit' | 'debit' | 'payout' =
+      type === 'debit' ? 'debit' : (type === 'payout' ? 'payout' : 'credit');
     const user = ensureUserRecord(uname);
     if (!Array.isArray(user.transactions)) user.transactions = [];
-    user.transactions.push({ amount: Number(amount || 0), timestamp: timestamp || new Date().toISOString() });
+    user.transactions.push({
+      amount: Number(amount || 0),
+      type: txType,
+      timestamp: timestamp || new Date().toISOString(),
+      ...(utrRef ? { utrRef: String(utrRef) } : {}),
+    });
     if (user.transactions.length > 300) user.transactions.splice(0, user.transactions.length - 300);
     if (balance !== undefined) user.balance = Number(balance);
     if (commission !== undefined) user.commission = Number(commission);
 
     if (smsRecord) {
+      const defaultSender = txType === 'debit' ? 'BANK-DR' : (txType === 'payout' ? 'PAYOUT-CR' : 'VM-BANK');
       db.smsLogs.unshift({
         id: smsRecord.id || `TXN-${Date.now()}`,
         username: uname,
         bankName: smsRecord.bankName || user.accountDetails?.bankName || 'Linked Bank',
-        senderCode: smsRecord.senderCode || 'VM-BANK',
+        senderCode: smsRecord.senderCode || defaultSender,
         amount: Number(amount || 0),
         accountNumber: smsRecord.accountNumber || user.accountDetails?.accountNumber || '',
         timestamp: timestamp || new Date().toISOString(),
@@ -782,11 +792,17 @@ async function startServer() {
 
     const accDetails = user.accountDetails;
     const last4 = String(accDetails?.accountNumber || '0000').slice(-4).padStart(4, '0');
+    const actionType = txType === 'debit' ? 'debit_transaction' : (txType === 'payout' ? 'payout_transaction' : 'credit_transaction');
+    const actionDetails = txType === 'debit'
+      ? `Auto-debited ₹${Number(amount || 0).toLocaleString('en-IN')} from ${accDetails?.bankName || 'Linked Bank'} (XXXX${last4})`
+      : (txType === 'payout'
+        ? `Commission Payout Credited ₹${Number(amount || 0).toLocaleString('en-IN')} to ${accDetails?.bankName || 'Linked Bank'} (XXXX${last4})${utrRef ? ` • UTR ${utrRef}` : ''}`
+        : `Auto-credited ₹${Number(amount || 0).toLocaleString('en-IN')} to ${accDetails?.bankName || 'Linked Bank'} (XXXX${last4})`);
     pushActivityLog(
       uname,
-      'credit_transaction',
-      `Auto-credited ₹${Number(amount || 0).toLocaleString('en-IN')} to ${accDetails?.bankName || 'Linked Bank'} (XXXX${last4})`,
-      'credit',
+      actionType,
+      actionDetails,
+      txType,
       'success'
     );
     saveDatabase(db);
@@ -978,8 +994,10 @@ async function startServer() {
   });
 
   // ----------------------------------------
-  // 5. VITE MIDDLEWARE (DEV & MULTI-PAGE SERVING)
+  // 5. STANDALONE ADMIN PANEL & VITE MIDDLEWARE
   // ----------------------------------------
+  app.use('/admin-panel', express.static(path.resolve(__dirname, 'admin-panel')));
+
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get(['/mahadev-admin', '/mahadev-admin.html'], (_req: Request, res: Response) => {

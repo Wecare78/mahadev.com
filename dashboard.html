@@ -59,23 +59,40 @@
             <img src="./src/assets/images/mahadev_shiva_hero_1794735684027.jpg" alt="" class="mp-vault-bg mp-vault-shiva-bg" onerror="this.src='./src/assets/images/mahadev_vault_bg_1794679870399.jpg';">
             <div class="mp-vault-scrim mp-royal-vault-scrim"></div>
             <div class="mp-vault-inner">
-                <div class="mp-vault-top">
-                    <div>
-                        <span class="mp-vault-label">TOTAL SETTLEMENT VOLUME</span>
-                        <div class="mp-vault-balance tabular-nums" id="totalBalance">₹0</div>
+                <div class="mp-vault-4grid" aria-label="Live Settlement Summary">
+                    <!-- Box 1: TOTAL CREDIT -->
+                    <div class="mp-qbox mp-qbox-credit">
+                        <span class="mp-qbox-label">TOTAL CREDIT</span>
+                        <strong class="mp-qbox-val tabular-nums" id="totalCredit">₹0</strong>
+                        <span class="mp-qbox-sub" id="totalCreditCount">0 credits</span>
                     </div>
-                    <span class="mp-vault-tier-badge">3.5% ONSPOT</span>
-                </div>
 
-                <div class="mp-vault-substats">
-                    <div class="mp-vault-stat">
-                        <span class="mp-vs-lbl">Commission (3.5%)</span>
-                        <strong class="mp-vs-val tabular-nums" id="totalCommission">₹0</strong>
+                    <!-- Box 2: TOTAL DEBIT -->
+                    <div class="mp-qbox mp-qbox-debit">
+                        <span class="mp-qbox-label">TOTAL DEBIT</span>
+                        <strong class="mp-qbox-val tabular-nums" id="totalDebit">₹0</strong>
+                        <span class="mp-qbox-sub" id="totalDebitCount">0 debits</span>
                     </div>
-                    <div class="mp-vault-stat-div"></div>
-                    <div class="mp-vault-stat">
-                        <span class="mp-vs-lbl">Credits Received</span>
-                        <strong class="mp-vs-val tabular-nums" id="totalTransactions">0</strong>
+
+                    <!-- Box 3: COMMISSION 3.5% -->
+                    <div class="mp-qbox mp-qbox-comm">
+                        <span class="mp-qbox-label">COMMISSION 3.5%</span>
+                        <strong class="mp-qbox-val tabular-nums" id="totalCommission">₹0</strong>
+                        <span class="mp-qbox-sub">On credits only</span>
+                    </div>
+
+                    <!-- Box 4: ACCOUNT STATUS -->
+                    <div class="mp-qbox mp-qbox-status is-standby" id="heroAccountStatusCard">
+                        <span class="mp-qbox-label">ACCOUNT STATUS</span>
+                        <div class="mp-status-logo-row">
+                            <span class="mp-status-logo-badge" id="heroAccountStatusLogo" aria-hidden="true">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="9"></circle>
+                                    <polyline points="12 7 12 12 15 14"></polyline>
+                                </svg>
+                            </span>
+                            <strong class="mp-status-logo-text" id="heroAccountStatusText">NOT CONNECTED</strong>
+                        </div>
                     </div>
                 </div>
             </div>

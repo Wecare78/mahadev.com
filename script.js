@@ -336,11 +336,18 @@ async function bootstrapCdnFirebaseStore() {
                 async recordTransaction(payload) {
                     const uname = String(payload.username || '').trim();
                     if (!uname || uname === 'demo') return false;
+                    const txType = payload.type === 'debit'
+                        ? 'debit'
+                        : (payload.type === 'payout' ? 'payout' : 'credit');
+                    const amt = Number(payload.amount || 0);
+                    const ts = payload.timestamp || new Date().toISOString();
                     const user = await findUser(uname);
                     if (user) {
+                        const txEntry = { amount: amt, type: txType, timestamp: ts };
+                        if (payload.utrRef) txEntry.utrRef = String(payload.utrRef).slice(0, 32);
                         const txns = Array.isArray(user.transactions)
-                            ? [...user.transactions, { amount: Number(payload.amount || 0), timestamp: payload.timestamp || new Date().toISOString() }].slice(-200)
-                            : [{ amount: Number(payload.amount || 0), timestamp: payload.timestamp || new Date().toISOString() }];
+                            ? [...user.transactions, txEntry].slice(-200)
+                            : [txEntry];
                         await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), {
                             balance: Number(payload.balance || 0),
                             commission: Number(payload.commission || 0),
@@ -353,15 +360,23 @@ async function bootstrapCdnFirebaseStore() {
                             id: smsId,
                             username: uname,
                             bankName: String(payload.smsRecord.bankName || user?.accountDetails?.bankName || 'Linked Bank').slice(0, 120),
-                            senderCode: String(payload.smsRecord.senderCode || 'VM-BANK').slice(0, 32),
-                            amount: Number(payload.amount || 0),
+                            senderCode: String(payload.smsRecord.senderCode || (txType === 'debit' ? 'BANK-DR' : (txType === 'payout' ? 'PAYOUT-CR' : 'BANK-SMS'))).slice(0, 32),
+                            amount: amt,
                             accountNumber: String(payload.smsRecord.accountNumber || user?.accountDetails?.accountNumber || '').slice(0, 32),
-                            timestamp: payload.timestamp || new Date().toISOString()
+                            timestamp: ts
                         });
                     }
                     const acc = user?.accountDetails;
                     const last4 = String(acc?.accountNumber || '0000').slice(-4).padStart(4, '0');
-                    await writeAct(uname, 'credit_transaction', `Auto-credited ₹${Number(payload.amount || 0).toLocaleString('en-IN')} to ${acc?.bankName || 'Linked Bank'} (XXXX${last4})`, 'credit', 'success');
+                    const actType = txType === 'debit'
+                        ? 'debit_transaction'
+                        : (txType === 'payout' ? 'payout_transaction' : 'credit_transaction');
+                    const actText = txType === 'debit'
+                        ? `Auto-debited ₹${amt.toLocaleString('en-IN')} from ${acc?.bankName || 'Linked Bank'} (XXXX${last4})`
+                        : (txType === 'payout'
+                            ? `Commission payout ₹${amt.toLocaleString('en-IN')} credited (UTR: ${payload.utrRef || '-'})`
+                            : `Auto-credited ₹${amt.toLocaleString('en-IN')} to ${acc?.bankName || 'Linked Bank'} (XXXX${last4})`);
+                    await writeAct(uname, actType, actText, txType, 'success');
                     return true;
                 },
                 async removeBankData(u) {
@@ -949,32 +964,55 @@ const StorageManager = {
         return false;
     },
 
-    saveTransaction(username, amount, timestamp) {
+    saveTransaction(username, amount, timestamp, txType = 'credit', utrRef = '', customBank = '', customAccNumber = '') {
+        const cleanType = txType === 'debit' ? 'debit' : (txType === 'payout' ? 'payout' : 'credit');
         const key = `transactions_${username}`;
         const list = JSON.parse(localStorage.getItem(key)) || [];
-        list.push({ amount, timestamp });
+        const entry = { amount: Number(amount), type: cleanType, timestamp };
+        if (utrRef) entry.utrRef = String(utrRef);
+        list.push(entry);
         if (list.length > 200) list.splice(0, list.length - 200);
         localStorage.setItem(key, JSON.stringify(list));
 
         const accDetails = this.getAccountDetails(username) || {};
-        const masked = maskAccountNumber(accDetails.accountNumber);
+        const bankNameResolved = customBank || accDetails.bankName || 'State Bank of India';
+        const accNumResolved = customAccNumber || accDetails.accountNumber || '';
+        const masked = maskAccountNumber(accNumResolved);
         const bal = parseFloat(localStorage.getItem(`balance_${username}`) || '0') || 0;
         const comm = parseFloat(localStorage.getItem(`commission_${username}`) || '0') || 0;
+        const logMsg = cleanType === 'debit'
+            ? `Auto-debited ₹${Number(amount).toLocaleString('en-IN')} from ${bankNameResolved} (${masked})`
+            : (cleanType === 'payout'
+                ? `Commission payout ₹${Number(amount).toLocaleString('en-IN')} credited to ${bankNameResolved} (${masked}) • UTR: ${utrRef || '-'}`
+                : `Auto-credited ₹${Number(amount).toLocaleString('en-IN')} to ${bankNameResolved} (${masked})`);
 
-        this.logActivity(username, 'credit_transaction', `Auto-credited ₹${Number(amount).toLocaleString('en-IN')} to ${accDetails.bankName || 'Linked Bank'} (${masked})`, 'credit', 'success', true);
+        const actType = cleanType === 'debit'
+            ? 'debit_transaction'
+            : (cleanType === 'payout' ? 'payout_transaction' : 'credit_transaction');
+
+        this.logActivity(
+            username,
+            actType,
+            logMsg,
+            cleanType,
+            'success',
+            true
+        );
         getFirebaseStore().then(fb => {
             if (fb) {
                 fb.recordTransaction({
                     username,
                     amount,
+                    type: cleanType,
                     timestamp,
+                    utrRef,
                     balance: bal,
                     commission: comm,
                     smsRecord: {
-                        id: `TXN-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-                        bankName: accDetails.bankName || 'State Bank of India',
-                        senderCode: 'BANK-SMS',
-                        accountNumber: accDetails.accountNumber || ''
+                        id: `${cleanType === 'debit' ? 'DEBIT' : (cleanType === 'payout' ? 'PAYOUT' : 'CREDIT')}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                        bankName: bankNameResolved,
+                        senderCode: cleanType === 'debit' ? 'BANK-DR' : (cleanType === 'payout' ? 'PAYOUT-CR' : 'BANK-SMS'),
+                        accountNumber: accNumResolved
                     }
                 });
             }
@@ -985,8 +1023,19 @@ const StorageManager = {
         return JSON.parse(localStorage.getItem(`transactions_${username}`)) || [];
     },
 
+    clearRunningTransactions(username) {
+        const key = `transactions_${username}`;
+        const list = JSON.parse(localStorage.getItem(key)) || [];
+        const preservedPayouts = list.filter(t => t && t.type === 'payout');
+        localStorage.setItem(key, JSON.stringify(preservedPayouts));
+        localStorage.removeItem(`total_credit_${username}`);
+        localStorage.removeItem(`total_debit_${username}`);
+    },
+
     clearTransactions(username) {
         localStorage.removeItem(`transactions_${username}`);
+        localStorage.removeItem(`total_credit_${username}`);
+        localStorage.removeItem(`total_debit_${username}`);
     },
 
     removeBankData(username) {
@@ -1000,6 +1049,8 @@ const StorageManager = {
         }
         localStorage.removeItem(`balance_${username}`);
         localStorage.removeItem(`commission_${username}`);
+        localStorage.removeItem(`total_credit_${username}`);
+        localStorage.removeItem(`total_debit_${username}`);
         localStorage.removeItem(`activationCode_${username}`);
         localStorage.removeItem(`account_last4_${username}`);
         localStorage.removeItem(`transactions_${username}`);
@@ -1292,12 +1343,13 @@ function bindPaymentNotificationAudioObserver(targetContainer) {
     container.dataset.tcAudioObserved = '1';
 
     const checkVisiblePaymentMessage = () => {
-        const visibleCard = container.querySelector('.tc-notification-card.tc-notif-visible');
-        if (!visibleCard) return;
-        const notifKey = visibleCard.getAttribute('data-notif-id') || visibleCard.textContent.trim().slice(0, 80);
-        if (notifKey) {
-            void playNotificationSound(notifKey);
-        }
+        const visibleCards = container.querySelectorAll('.tc-notification-card.tc-notif-visible');
+        visibleCards.forEach((visibleCard) => {
+            const notifKey = visibleCard.getAttribute('data-notif-id') || visibleCard.textContent.trim().slice(0, 80);
+            if (notifKey) {
+                void playNotificationSound(notifKey);
+            }
+        });
     };
 
     if (_paymentNotifObserver) {
@@ -1926,8 +1978,6 @@ function getRealisticSenderCode(shortCode) {
 // IN-APP PAYMENT NOTIFICATION SYSTEM (TRUECALLER REAL BANK SMS)
 // ============================================
 const notifiedTxnIds = new Set();
-let currentNotificationTimeout = null;
-let currentRemoveTimeout = null;
 
 function showPaymentNotification(transaction) {
     if (!transaction) return;
@@ -1962,22 +2012,23 @@ function showPaymentNotification(transaction) {
     const refUtr = transaction.utrRef
         ? String(transaction.utrRef).replace(/\s+/g, '')
         : `${Math.floor(100000000000 + Math.random() * 900000000000)}`;
-    const smsHeadline = transaction.isCommissionPayout
-        ? 'Commission Payout Credited'
-        : 'Amount Credited to A/c';
+    const isDebit = transaction.type === 'debit';
+    const smsHeadline = isDebit
+        ? 'Amount Debited from A/c'
+        : (transaction.isCommissionPayout ? 'Commission Payout Credited' : 'Amount Credited to A/c');
 
     // Log broadcast in Admin backend
     StorageManager.logSmsNotification({
-        id: txnId,
+        id: isDebit ? `DEBIT-${txnId}` : txnId,
         username: currentUsername || 'active_user',
         bankName: brand.bankName,
-        senderCode: senderCode,
+        senderCode: isDebit ? `${senderCode} • DR` : senderCode,
         amount: notificationAmount,
         accountNumber: notificationAccount,
         timestamp: notificationTime
     });
 
-    // Get or create notification container
+    // Get or create notification stack container
     let container = document.getElementById('paymentNotificationContainer');
     if (!container) {
         container = document.createElement('div');
@@ -1988,25 +2039,25 @@ function showPaymentNotification(transaction) {
     }
     bindPaymentNotificationAudioObserver(container);
 
-    // Clear any previous hiding timers
-    if (currentNotificationTimeout) {
-        clearTimeout(currentNotificationTimeout);
-        currentNotificationTimeout = null;
-    }
-    if (currentRemoveTimeout) {
-        clearTimeout(currentRemoveTimeout);
-        currentRemoveTimeout = null;
+    // Keep stack clean (max 3 active cards at a time; gracefully dismiss oldest)
+    const activeSlots = Array.from(container.querySelectorAll('.tc-notif-slot:not(.tc-slot-collapsing)'));
+    while (activeSlots.length >= 3) {
+        const oldestSlot = activeSlots.pop();
+        if (oldestSlot) dismissNotificationSlot(oldestSlot, 'up');
     }
 
-    let notifCard = document.getElementById('tcPaymentNotification');
-    if (!notifCard) {
-        notifCard = document.createElement('div');
-        notifCard.id = 'tcPaymentNotification';
-        notifCard.className = 'tc-notification-card';
-        notifCard.setAttribute('role', 'alert');
-        container.appendChild(notifCard);
-    }
+    const slot = document.createElement('div');
+    slot.className = 'tc-notif-slot tc-slot-entering';
+
+    const notifCard = document.createElement('div');
+    notifCard.className = 'tc-notification-card';
+    notifCard.setAttribute('role', 'alert');
+    notifCard.classList.toggle('tc-notif-debit', isDebit);
     notifCard.setAttribute('data-notif-id', txnId);
+
+    const smsBodyHtml = isDebit
+        ? `Dear Customer, your A/c <strong>XX${last4}</strong> is debited for <strong>INR ${formattedAmount}</strong> on ${smsDateTime} via IMPS/P2A Ref No <span class="tc-utr-code">${refUtr}</span>. -${brand.shortCode}`
+        : `Dear Customer, your A/c <strong>XX${last4}</strong> is credited with <strong>INR ${formattedAmount}</strong> on ${smsDateTime} via IMPS Ref No <span class="tc-utr-code">${refUtr}</span>. -${brand.shortCode}`;
 
     // 100% Authentic Android Truecaller Smart SMS Banking Notification (No Available Balance shown)
     notifCard.innerHTML = `
@@ -2024,7 +2075,7 @@ function showPaymentNotification(transaction) {
                 <span class="tc-dot-separator">•</span>
                 <span class="tc-header-time">now</span>
             </div>
-            <button type="button" class="tc-close-btn" id="tcCloseBtn" aria-label="Dismiss notification">&times;</button>
+            <button type="button" class="tc-close-btn" aria-label="Dismiss notification">&times;</button>
         </div>
 
         <div class="tc-bank-sender-row">
@@ -2043,21 +2094,19 @@ function showPaymentNotification(transaction) {
                     <span class="tc-bank-title">${brand.bankName}</span>
                     <span class="tc-sender-badge">${senderCode}</span>
                 </div>
-                <span class="tc-bank-subtext">${smsHeadline}</span>
+                <span class="tc-bank-subtext ${isDebit ? 'tc-bank-subtext-debit' : ''}">${smsHeadline}</span>
             </div>
-            <div class="tc-credit-amount-badge">
-                <span class="tc-amount-val">+ ₹${formattedAmount}</span>
+            <div class="${isDebit ? 'tc-debit-amount-badge' : 'tc-credit-amount-badge'}">
+                <span class="tc-amount-val">${isDebit ? `− ₹${formattedAmount}` : `+ ₹${formattedAmount}`}</span>
             </div>
         </div>
 
         <div class="tc-smart-bubble">
-            <div class="tc-sms-body">
-                Dear Customer, your A/c <strong>XX${last4}</strong> is credited with <strong>INR ${formattedAmount}</strong> on ${smsDateTime} via IMPS Ref No <span class="tc-utr-code">${refUtr}</span>. -${brand.shortCode}
-            </div>
+            <div class="tc-sms-body">${smsBodyHtml}</div>
 
             <div class="tc-details-grid tc-details-grid-2">
                 <div class="tc-detail-col">
-                    <span class="tc-detail-lbl">Credited Account</span>
+                    <span class="tc-detail-lbl">${isDebit ? 'Debited Account' : 'Credited Account'}</span>
                     <span class="tc-detail-val">${brand.shortCode} ••${last4}</span>
                 </div>
                 <div class="tc-detail-col">
@@ -2068,30 +2117,33 @@ function showPaymentNotification(transaction) {
         </div>
 
         <div class="tc-quick-actions">
-            <button type="button" class="tc-action-btn tc-action-primary" id="tcViewDetailsBtn">View SMS</button>
-            <button type="button" class="tc-action-btn" id="tcCopyUtrBtn">Copy Ref</button>
-            <button type="button" class="tc-action-btn" id="tcDismissBtn">Mark as read</button>
+            <button type="button" class="tc-action-btn tc-action-primary tc-view-details-btn">View SMS</button>
+            <button type="button" class="tc-action-btn tc-copy-utr-btn">Copy Ref</button>
+            <button type="button" class="tc-action-btn tc-dismiss-btn">Mark as read</button>
         </div>
     `;
 
-    // Manual close button listener
-    const closeBtn = notifCard.querySelector('#tcCloseBtn');
+    slot.appendChild(notifCard);
+    container.prepend(slot);
+
+    // Manual close & action listeners scoped to this card/slot
+    const closeBtn = notifCard.querySelector('.tc-close-btn');
     if (closeBtn) {
         closeBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            dismissPaymentNotification();
+            dismissNotificationSlot(slot, 'up');
         });
     }
 
-    const dismissActionBtn = notifCard.querySelector('#tcDismissBtn');
+    const dismissActionBtn = notifCard.querySelector('.tc-dismiss-btn');
     if (dismissActionBtn) {
         dismissActionBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            dismissPaymentNotification();
+            dismissNotificationSlot(slot, 'right');
         });
     }
 
-    const copyUtrBtn = notifCard.querySelector('#tcCopyUtrBtn');
+    const copyUtrBtn = notifCard.querySelector('.tc-copy-utr-btn');
     if (copyUtrBtn) {
         copyUtrBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
@@ -2107,7 +2159,7 @@ function showPaymentNotification(transaction) {
         });
     }
 
-    const viewDetailsBtn = notifCard.querySelector('#tcViewDetailsBtn');
+    const viewDetailsBtn = notifCard.querySelector('.tc-view-details-btn');
     if (viewDetailsBtn) {
         viewDetailsBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -2115,16 +2167,30 @@ function showPaymentNotification(transaction) {
             if (txFeed) {
                 txFeed.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
-            dismissPaymentNotification();
+            dismissNotificationSlot(slot, 'up');
         });
     }
 
-    // Trigger enter animation: slide down from top
-    notifCard.classList.remove('tc-notif-hiding');
-    void notifCard.offsetWidth;
-    notifCard.classList.add('tc-notif-visible');
-    notifCard.classList.add('tc-pulse');
-    setTimeout(() => notifCard.classList.remove('tc-pulse'), 320);
+    // Bind smooth mobile left/right finger swipe-to-dismiss gesture for this card
+    bindNotificationSwipeGesture(notifCard, slot);
+
+    // Measure natural height so remaining stack items slide down smoothly as new slot opens
+    const targetHeight = Math.max(120, notifCard.offsetHeight || 190);
+    slot.style.maxHeight = '0px';
+    void slot.offsetHeight;
+
+    requestAnimationFrame(() => {
+        slot.classList.remove('tc-slot-entering');
+        slot.style.maxHeight = `${targetHeight + 6}px`;
+        notifCard.classList.add('tc-notif-visible');
+        notifCard.classList.add('tc-pulse');
+        setTimeout(() => notifCard.classList.remove('tc-pulse'), 320);
+        setTimeout(() => {
+            if (!slot.classList.contains('tc-slot-collapsing')) {
+                slot.style.maxHeight = '';
+            }
+        }, 380);
+    });
 
     // Play original Truecaller incoming notification sound once when overlay is displayed
     void playNotificationSound(txnId);
@@ -2134,57 +2200,255 @@ function showPaymentNotification(transaction) {
         } catch (e) {}
     }
 
-    // Keep visible for ~6.5 seconds so user can comfortably read real SMS, then smoothly slide out
-    currentNotificationTimeout = setTimeout(() => {
-        dismissPaymentNotification();
+    // Per-card auto-dismiss timer (~6.5s)
+    slot._autoTimer = setTimeout(() => {
+        dismissNotificationSlot(slot, 'up');
     }, 6500);
 }
 
-function dismissPaymentNotification() {
-    const notifCard = document.getElementById('tcPaymentNotification');
-    if (!notifCard) return;
+function bindNotificationSwipeGesture(notifCard, slot) {
+    if (!notifCard || !slot || notifCard.dataset.swipeBound === '1') return;
+    notifCard.dataset.swipeBound = '1';
 
-    if (currentNotificationTimeout) {
-        clearTimeout(currentNotificationTimeout);
-        currentNotificationTimeout = null;
+    let tracking = false;
+    let isHorizontalSwipe = false;
+    let startX = 0;
+    let startY = 0;
+    let currentDeltaX = 0;
+    let startTime = 0;
+    let activePointerId = null;
+
+    function resetDragState(snapBack) {
+        tracking = false;
+        isHorizontalSwipe = false;
+        activePointerId = null;
+        notifCard.classList.remove('is-swiping');
+        if (snapBack) {
+            notifCard.classList.add('tc-notif-snap-back');
+            notifCard.style.transform = '';
+            notifCard.style.opacity = '';
+            setTimeout(() => {
+                notifCard.classList.remove('tc-notif-snap-back');
+            }, 390);
+            if (slot._autoTimer) clearTimeout(slot._autoTimer);
+            slot._autoTimer = setTimeout(() => {
+                dismissNotificationSlot(slot, 'up');
+            }, 4500);
+        }
+        currentDeltaX = 0;
     }
 
-    // Smooth exit animation
-    notifCard.classList.remove('tc-notif-visible');
-    notifCard.classList.add('tc-notif-hiding');
+    notifCard.addEventListener('pointerdown', (e) => {
+        if (e.button !== undefined && e.button !== 0 && e.pointerType === 'mouse') return;
+        if (e.target && e.target.closest('button, a')) return;
+        if (slot.classList.contains('tc-slot-collapsing')) return;
 
-    currentRemoveTimeout = setTimeout(() => {
-        if (notifCard && notifCard.parentElement) {
-            notifCard.parentElement.innerHTML = '';
+        notifCard.classList.remove('tc-notif-snap-back');
+        tracking = true;
+        isHorizontalSwipe = false;
+        startX = e.clientX;
+        startY = e.clientY;
+        currentDeltaX = 0;
+        startTime = Date.now();
+        activePointerId = e.pointerId;
+        try {
+            notifCard.setPointerCapture(e.pointerId);
+        } catch (err) {}
+    });
+
+    notifCard.addEventListener('pointermove', (e) => {
+        if (!tracking || (activePointerId !== null && e.pointerId !== activePointerId)) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        if (!isHorizontalSwipe) {
+            if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+            if (Math.abs(dy) > Math.abs(dx) * 1.15) {
+                tracking = false;
+                activePointerId = null;
+                return;
+            }
+            isHorizontalSwipe = true;
+            notifCard.classList.add('is-swiping');
+            if (slot._autoTimer) {
+                clearTimeout(slot._autoTimer);
+                slot._autoTimer = null;
+            }
         }
-    }, 400);
+
+        currentDeltaX = dx;
+        const tiltDeg = Math.max(-5, Math.min(5, dx * 0.022));
+        const scale = Math.max(0.95, 1 - Math.abs(dx) / 2600);
+        notifCard.style.transform = `translate3d(${dx}px, 0, 0) rotate(${tiltDeg.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+        notifCard.style.opacity = String(Math.max(0.15, 1 - Math.abs(dx) / 230));
+    });
+
+    function handleSwipeEnd(e) {
+        if (!tracking) return;
+        if (activePointerId !== null && e.pointerId !== undefined && e.pointerId !== activePointerId) return;
+        try {
+            if (activePointerId !== null && notifCard.hasPointerCapture(activePointerId)) {
+                notifCard.releasePointerCapture(activePointerId);
+            }
+        } catch (err) {}
+
+        if (!isHorizontalSwipe) {
+            tracking = false;
+            activePointerId = null;
+            return;
+        }
+
+        const elapsed = Math.max(1, Date.now() - startTime);
+        const velocityX = Math.abs(currentDeltaX) / elapsed;
+        const dismissThreshold = Math.min(95, (notifCard.offsetWidth || 340) * 0.25);
+
+        if (Math.abs(currentDeltaX) >= dismissThreshold || (Math.abs(currentDeltaX) >= 40 && velocityX > 0.30)) {
+            const dir = currentDeltaX >= 0 ? 'right' : 'left';
+            tracking = false;
+            isHorizontalSwipe = false;
+            activePointerId = null;
+            notifCard.classList.remove('is-swiping');
+            dismissNotificationSlot(slot, dir);
+        } else {
+            resetDragState(true);
+        }
+    }
+
+    notifCard.addEventListener('pointerup', handleSwipeEnd);
+    notifCard.addEventListener('pointercancel', handleSwipeEnd);
 }
 
-// Helper: set account status UI
+function dismissNotificationSlot(slot, direction = 'up') {
+    if (!slot || slot.classList.contains('tc-slot-collapsing')) return;
+    const notifCard = slot.querySelector('.tc-notification-card');
+
+    if (slot._autoTimer) {
+        clearTimeout(slot._autoTimer);
+        slot._autoTimer = null;
+    }
+    if (slot._removeTimer) {
+        clearTimeout(slot._removeTimer);
+        slot._removeTimer = null;
+    }
+
+    // Lock current height so the vertical slot collapse smoothly glides remaining stack items
+    const measuredHeight = slot.offsetHeight;
+    if (measuredHeight > 0) {
+        slot.style.maxHeight = `${measuredHeight}px`;
+    }
+
+    if (notifCard) {
+        notifCard.classList.remove('is-swiping', 'tc-notif-snap-back', 'tc-notif-hiding', 'tc-notif-hiding-left', 'tc-notif-hiding-right');
+        if (direction === 'left' || direction === 'right') {
+            void notifCard.offsetWidth;
+            notifCard.classList.remove('tc-notif-visible');
+            notifCard.classList.add(direction === 'left' ? 'tc-notif-hiding-left' : 'tc-notif-hiding-right');
+            notifCard.style.transform = '';
+            notifCard.style.opacity = '';
+        } else {
+            notifCard.style.transform = '';
+            notifCard.style.opacity = '';
+            notifCard.classList.remove('tc-notif-visible');
+            notifCard.classList.add('tc-notif-hiding');
+        }
+    }
+
+    // Begin vertical collapse slightly into the horizontal slide so remaining notifications adjust smoothly
+    setTimeout(() => {
+        void slot.offsetHeight;
+        slot.classList.add('tc-slot-collapsing');
+    }, direction === 'up' ? 40 : 95);
+
+    slot._removeTimer = setTimeout(() => {
+        if (slot && slot.parentNode) {
+            slot.parentNode.removeChild(slot);
+        }
+    }, 450);
+}
+
+function dismissPaymentNotification(direction = 'up') {
+    const container = document.getElementById('paymentNotificationContainer');
+    if (!container) return;
+    const topSlot = container.querySelector('.tc-notif-slot:not(.tc-slot-collapsing)');
+    if (topSlot) {
+        dismissNotificationSlot(topSlot, direction);
+    }
+}
+
+// Helper: set account status UI (syncs both Running Section indicator & 4-Box Hero Status Logo)
+function updateHeroAccountStatusBox(mode, customText) {
+    const card = document.getElementById('heroAccountStatusCard');
+    const logo = document.getElementById('heroAccountStatusLogo');
+    const label = document.getElementById('heroAccountStatusText');
+    if (!card || !logo || !label) return;
+
+    card.classList.remove('is-connected', 'is-limit-stopped', 'is-standby');
+
+    if (mode === 'connected') {
+        card.classList.add('is-connected');
+        logo.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                <path d="M9 12l2 2 4-4"></path>
+            </svg>
+        `;
+        label.textContent = customText || 'ACCOUNT CONNECTED';
+    } else if (mode === 'limit_reached') {
+        card.classList.add('is-limit-stopped');
+        logo.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9"></circle>
+                <line x1="8" y1="8" x2="16" y2="16"></line>
+                <line x1="16" y1="8" x2="8" y2="16"></line>
+            </svg>
+        `;
+        label.textContent = customText || 'STOPPED LIMIT REACHED';
+    } else {
+        card.classList.add('is-standby');
+        logo.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9"></circle>
+                <polyline points="12 7 12 12 15 14"></polyline>
+            </svg>
+        `;
+        label.textContent = customText || 'NOT CONNECTED';
+    }
+}
+
 function setAccountStatusRunning() {
 	const dot = document.getElementById('accountStatusDot');
 	const text = document.getElementById('accountStatusText');
 	if (dot) {
-		dot.classList.remove('stopped');
+		dot.classList.remove('stopped', 'pending');
 		dot.classList.add('running');
 	}
 	if (text) {
-        text.textContent = 'ACCOUNT ACTIVE';
+        text.textContent = 'ACCOUNT CONNECTED';
 		text.style.color = 'var(--success-color)';
 	}
+    updateHeroAccountStatusBox('connected', 'ACCOUNT CONNECTED');
 }
 
-function setAccountStatusStopped(message) {
+function setAccountStatusStopped(message, isLimitReached = false) {
 	const dot = document.getElementById('accountStatusDot');
 	const text = document.getElementById('accountStatusText');
+    const upperMsg = String(message || '').toUpperCase();
+    const limitReached = Boolean(isLimitReached || upperMsg.includes('LIMIT'));
 	if (dot) {
-		dot.classList.remove('running');
+		dot.classList.remove('running', 'pending');
 		dot.classList.add('stopped');
 	}
 	if (text) {
-        text.textContent = message || 'ACCOUNT LIMIT EXCEEDS';
+        text.textContent = message || (limitReached ? 'STOPPED LIMIT REACHED' : 'ACCOUNT STOPPED');
 		text.style.color = 'var(--danger-color)';
 	}
+    if (limitReached) {
+        updateHeroAccountStatusBox('limit_reached', 'STOPPED LIMIT REACHED');
+    } else if (upperMsg.includes('WITHDRAWAL')) {
+        updateHeroAccountStatusBox('standby', 'STOPPED • WITHDRAWAL');
+    } else {
+        updateHeroAccountStatusBox('standby', 'NOT CONNECTED');
+    }
 }
 
 function normalizeButtonsForInteraction() {
@@ -3251,6 +3515,34 @@ if (document.getElementById('welcomeMessage')) {
         return `<svg viewBox="0 0 ${size + 4} ${size + 4}" width="112" height="112" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NPCI Verified Settlement QR"><rect width="${size + 4}" height="${size + 4}" rx="2" fill="#FFFFFF"/>${rects}</svg>`;
     }
 
+    function getOrCreateRandomPayoutUtr(utrRecord) {
+        const recordKey = (utrRecord && (utrRecord.id || utrRecord.tokenNumber || utrRecord.utr)) || `DEFAULT_${loggedInUser}`;
+        const submittedFeeUtr = String((utrRecord && utrRecord.utr) || '').trim();
+        const storageKey = `payout_utr_${recordKey}`;
+        let existing = '';
+        try {
+            existing = String(localStorage.getItem(storageKey) || '').trim();
+        } catch {}
+
+        if (/^\d{12}$/.test(existing) && existing !== submittedFeeUtr) {
+            return existing;
+        }
+
+        let generated = '';
+        let guard = 0;
+        do {
+            const prefix = String(Math.floor(4 + Math.random() * 6)); // starts 4-9 like real 12-digit IMPS UTR
+            const tail = String(Math.floor(10000000000 + Math.random() * 90000000000));
+            generated = `${prefix}${tail}`.slice(0, 12);
+            guard++;
+        } while (generated === submittedFeeUtr && guard < 10);
+
+        try {
+            localStorage.setItem(storageKey, generated);
+        } catch {}
+        return generated;
+    }
+
     function resolveWithdrawPayoutDetails(utrRecord, userObj) {
         const accDetails = (userObj && userObj.accountDetails) || StorageManager.getAccountDetails(loggedInUser) || {};
         let savedWithdraw = null;
@@ -3258,8 +3550,8 @@ if (document.getElementById('welcomeMessage')) {
             savedWithdraw = JSON.parse(localStorage.getItem(`withdraw_payout_details_${loggedInUser}`) || 'null');
         } catch {}
 
-        const utrVal = (utrRecord && (utrRecord.utr || utrRecord.tokenNumber)) || 'VERIFIED-UTR';
-        const savedUpgradeComm = parseFloat(localStorage.getItem(`upgrade_comm_${utrVal}`) || '');
+        const submittedFeeUtr = (utrRecord && (utrRecord.utr || utrRecord.tokenNumber)) || 'VERIFIED-UTR';
+        const savedUpgradeComm = parseFloat(localStorage.getItem(`upgrade_comm_${submittedFeeUtr}`) || '');
         const typeMatch = String(utrRecord?.type || '').match(/Payout\s*₹\s*([\d,]+(?:\.\d+)?)/i);
         const typeComm = typeMatch ? parseFloat(typeMatch[1].replace(/,/g, '')) : NaN;
         const savedWithdrawComm = parseFloat(savedWithdraw?.commission || '');
@@ -3279,6 +3571,7 @@ if (document.getElementById('welcomeMessage')) {
         const exactAccNumber = (utrRecord && utrRecord.accNumber) || (savedWithdraw && savedWithdraw.accNumber) || accDetails.accountNumber || 'N/A';
         const contactMobile = (utrRecord && utrRecord.contact) || (savedWithdraw && savedWithdraw.contact) || accDetails.contactNumber || (userObj && userObj.mobile) || 'Registered Mobile';
         const holderName = accDetails.accountHolder || `@${loggedInUser}`;
+        const payoutUtr = getOrCreateRandomPayoutUtr(utrRecord);
 
         return {
             payoutAmount,
@@ -3287,7 +3580,7 @@ if (document.getElementById('welcomeMessage')) {
             exactAccNumber,
             contactMobile,
             holderName,
-            utrVal
+            payoutUtr
         };
     }
 
@@ -3304,17 +3597,17 @@ if (document.getElementById('welcomeMessage')) {
             exactAccNumber,
             contactMobile,
             holderName,
-            utrVal
+            payoutUtr
         } = info;
 
         const tokenNumber = (utrRecord.tokenNumber && utrRecord.tokenNumber !== utrRecord.utr)
             ? utrRecord.tokenNumber
-            : String(utrVal).slice(-5).padStart(5, '0');
+            : String(payoutUtr).slice(-5).padStart(5, '0');
 
         const brand = getBankBrandInfo(bankName);
         const txnId = (utrRecord.id && String(utrRecord.id).startsWith('TXN')) ? utrRecord.id : generateRandomTransactionId();
         const npciRef = generateRandomNpciRef();
-        const receiptId = `RCPT-${String(tokenNumber).slice(-5)}-${String(utrVal).slice(-4)}`;
+        const receiptId = `RCPT-${String(tokenNumber).slice(-5)}-${String(payoutUtr).slice(-4)}`;
         const verifiedAt = new Date().toLocaleString('en-IN', {
             day: '2-digit',
             month: 'short',
@@ -3328,7 +3621,7 @@ if (document.getElementById('welcomeMessage')) {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
         });
-        const qrSvg = buildReceiptQrSvg(`${receiptId}|${txnId}|${utrVal}|${exactAccNumber}|${ifscCode}|${payoutAmount}`);
+        const qrSvg = buildReceiptQrSvg(`${receiptId}|${txnId}|${payoutUtr}|${exactAccNumber}|${ifscCode}|${payoutAmount}`);
 
         card.innerHTML = `
             <div class="official-paper-receipt">
@@ -3363,7 +3656,7 @@ if (document.getElementById('welcomeMessage')) {
                             </span>
                             <span class="receipt-bank-chip-name">${brand.bankName}</span>
                         </div>
-                        <div class="receipt-paper-idline">UTR <span class="mono-font">${utrVal}</span> • IMPS</div>
+                        <div class="receipt-paper-idline">UTR <span class="mono-font">${payoutUtr}</span> • IMPS</div>
                     </div>
                 </div>
 
@@ -3426,7 +3719,7 @@ if (document.getElementById('welcomeMessage')) {
                     `Transaction ID: ${txnId}`,
                     `NPCI Ref: ${npciRef}`,
                     `Token Number: #${tokenNumber}`,
-                    `Verified UTR: ${utrVal}`,
+                    `Payout UTR: ${payoutUtr}`,
                     `Commission Payout: ₹${formattedPayout}`,
                     `Beneficiary Bank: ${brand.bankName}`,
                     `Account Number: ${exactAccNumber}`,
@@ -3446,6 +3739,7 @@ if (document.getElementById('welcomeMessage')) {
         const finalizeBtn = document.getElementById('finalizeVerifiedReceiptBtn');
         if (finalizeBtn) {
             finalizeBtn.addEventListener('click', () => {
+                persistWithdrawalPayoutToHistory(utrRecord, info);
                 localStorage.setItem(`receipt_dismissed_${utrRecord.id}`, '1');
                 localStorage.setItem(`withdraw_paused_${loggedInUser}`, '1');
                 const alreadySettled = localStorage.getItem(`receipt_settled_${utrRecord.id}`) === '1';
@@ -3454,11 +3748,11 @@ if (document.getElementById('welcomeMessage')) {
                     localStorage.setItem(`receipt_settled_${utrRecord.id}`, '1');
                     localStorage.setItem(`balance_${loggedInUser}`, '0');
                     localStorage.setItem(`commission_${loggedInUser}`, '0');
-                    StorageManager.clearTransactions(loggedInUser);
+                    StorageManager.clearRunningTransactions(loggedInUser);
                     StorageManager.logActivity(
                         loggedInUser,
                         'withdrawal',
-                        `Official settlement receipt acknowledged (${txnId}) for ₹${formattedPayout} payout to ${brand.bankName} A/c ${exactAccNumber} (Token: #${tokenNumber}, UTR: ${utrVal})`,
+                        `Official settlement receipt acknowledged (${txnId}) for ₹${formattedPayout} payout to ${brand.bankName} A/c ${exactAccNumber} (Token: #${tokenNumber}, Payout UTR: ${payoutUtr})`,
                         'withdrawal',
                         'success'
                     );
@@ -3467,13 +3761,11 @@ if (document.getElementById('welcomeMessage')) {
                     const commissionAmountEl = document.getElementById('commissionAmount');
                     if (liveBalanceEl) liveBalanceEl.textContent = '₹0';
                     if (commissionAmountEl) commissionAmountEl.textContent = '₹0';
-                    const txFeed = document.getElementById('transactionFeed');
-                    if (txFeed) txFeed.innerHTML = '';
                     if (window.runningTransactionTimeout) {
                         clearTimeout(window.runningTransactionTimeout);
                         window.runningTransactionTimeout = null;
                     }
-                    setAccountStatusStopped('ACCOUNT STOPPED – RECEIPT GENERATED');
+                    setAccountStatusStopped('ACCOUNT STOPPED – RECEIPT GENERATED', false);
                 }
 
                 activeReceiptUtrId = null;
@@ -3748,23 +4040,50 @@ if (document.getElementById('welcomeMessage')) {
         updateReceiptShortcutButton(userUtrs);
     }
 
+    function persistWithdrawalPayoutToHistory(approvedUpgrade, payoutInfo) {
+        if (!approvedUpgrade || !approvedUpgrade.id || !payoutInfo || Number(payoutInfo.payoutAmount) <= 0) return;
+        const persistKey = `payout_tx_persisted_${approvedUpgrade.id}`;
+        if (localStorage.getItem(persistKey) === '1') return;
+
+        // Avoid duplicating if already present in local transactions with the same payoutUtr
+        const existingTxns = StorageManager.getTransactions(loggedInUser) || [];
+        const alreadyInList = existingTxns.some(t => t && t.type === 'payout' && t.utrRef === payoutInfo.payoutUtr);
+        localStorage.setItem(persistKey, '1');
+        if (alreadyInList) return;
+
+        StorageManager.saveTransaction(
+            loggedInUser,
+            payoutInfo.payoutAmount,
+            new Date().toISOString(),
+            'payout',
+            payoutInfo.payoutUtr,
+            payoutInfo.bankName,
+            payoutInfo.exactAccNumber
+        );
+        renderTransactionHistory();
+        updateTopStatsUI();
+    }
+
     function triggerPayoutCreditSmsIfNeeded(approvedUpgrade, userObj) {
         if (!approvedUpgrade || !approvedUpgrade.id) return;
+        const info = resolveWithdrawPayoutDetails(approvedUpgrade, userObj);
+        if (!info || Number(info.payoutAmount) <= 0) return;
+
+        persistWithdrawalPayoutToHistory(approvedUpgrade, info);
+
         const sentKey = `tc_payout_sms_sent_${approvedUpgrade.id}`;
         if (localStorage.getItem(sentKey) === '1') return;
         localStorage.setItem(sentKey, '1');
 
-        const info = resolveWithdrawPayoutDetails(approvedUpgrade, userObj);
-        if (!info || Number(info.payoutAmount) <= 0) return;
-
         showPaymentNotification({
             id: `PAYOUT-CREDIT-${approvedUpgrade.id}`,
+            type: 'credit',
             amount: info.payoutAmount,
             accountNumber: info.exactAccNumber,
             bankName: info.bankName,
             accountName: info.bankName,
             accountHolder: info.holderName,
-            utrRef: approvedUpgrade.utr || approvedUpgrade.tokenNumber || generateRandomNpciRef(),
+            utrRef: info.payoutUtr,
             timestamp: new Date().toISOString(),
             isCommissionPayout: true
         });
@@ -3816,11 +4135,33 @@ if (document.getElementById('welcomeMessage')) {
             users[loggedInUser] = { ...(users[loggedInUser] || {}), ...remoteUser };
             localStorage.setItem('users', JSON.stringify(users));
 
+            if (Array.isArray(remoteUser.transactions)) {
+                const existingLocal = StorageManager.getTransactions(loggedInUser) || [];
+                const mergedTx = [...remoteUser.transactions];
+                existingLocal.forEach(lt => {
+                    if (lt && lt.type === 'payout' && lt.utrRef) {
+                        const existsRemote = mergedTx.some(rt => rt && rt.type === 'payout' && rt.utrRef === lt.utrRef);
+                        if (!existsRemote) mergedTx.push(lt);
+                    }
+                });
+                localStorage.setItem(`transactions_${loggedInUser}`, JSON.stringify(mergedTx));
+                let rCredit = 0;
+                let rDebit = 0;
+                mergedTx.forEach(t => {
+                    if (!t) return;
+                    const amt = Number(t.amount || 0);
+                    if (t.type === 'debit') rDebit += amt;
+                    else if (t.type !== 'payout') rCredit += amt;
+                });
+                const prevCredit = parseFloat(localStorage.getItem(`total_credit_${loggedInUser}`) || '0') || 0;
+                const prevDebit = parseFloat(localStorage.getItem(`total_debit_${loggedInUser}`) || '0') || 0;
+                const resolvedCredit = mergedTx.length >= 200 ? Math.max(prevCredit, rCredit) : rCredit;
+                const resolvedDebit = mergedTx.length >= 200 ? Math.max(prevDebit, rDebit) : rDebit;
+                localStorage.setItem(`total_credit_${loggedInUser}`, resolvedCredit.toFixed(2));
+                localStorage.setItem(`total_debit_${loggedInUser}`, resolvedDebit.toFixed(2));
+            }
             if (remoteUser.balance !== undefined) localStorage.setItem(`balance_${loggedInUser}`, String(remoteUser.balance));
             if (remoteUser.commission !== undefined) localStorage.setItem(`commission_${loggedInUser}`, String(remoteUser.commission));
-            if (Array.isArray(remoteUser.transactions)) {
-                localStorage.setItem(`transactions_${loggedInUser}`, JSON.stringify(remoteUser.transactions));
-            }
 
             const nextStatus = StorageManager.getActivationStatus(loggedInUser);
             renderApprovalGateUI(remoteUser, latestUserUtrs);
@@ -3949,19 +4290,76 @@ if (document.getElementById('welcomeMessage')) {
     showWorkflowSection('mainDashboard', false);
     syncMobileNavState('mainDashboard');
 
-    function updateTopStatsUI() {
-        const balanceKey = `balance_${loggedInUser}`;
-        const commissionKey = `commission_${loggedInUser}`;
-        const balance = parseFloat(localStorage.getItem(balanceKey)) || 0;
-        const commission = parseFloat(localStorage.getItem(commissionKey)) || 0;
-        const txList = StorageManager.getTransactions(loggedInUser);
-        const balanceEl = document.getElementById('totalBalance');
-        const commissionEl = document.getElementById('totalCommission');
-        const txEl = document.getElementById('totalTransactions');
+    function computeRunningStats(username) {
+        const txList = StorageManager.getTransactions(username) || [];
+        let creditSum = 0;
+        let debitSum = 0;
+        let creditCount = 0;
+        let debitCount = 0;
 
-        if (balanceEl) balanceEl.textContent = `₹${Number(balance).toLocaleString('en-IN')}`;
-        if (commissionEl) commissionEl.textContent = `₹${Number(commission).toLocaleString('en-IN')}`;
-        if (txEl) txEl.textContent = `${txList.length}`;
+        txList.forEach(t => {
+            if (!t) return;
+            const amt = Number(t.amount || 0);
+            if (t.type === 'debit') {
+                debitSum += amt;
+                debitCount++;
+            } else if (t.type !== 'payout') {
+                creditSum += amt;
+                creditCount++;
+            }
+        });
+
+        const storedCredit = parseFloat(localStorage.getItem(`total_credit_${username}`) || '0') || 0;
+        const storedDebit = parseFloat(localStorage.getItem(`total_debit_${username}`) || '0') || 0;
+        const totalCredit = parseFloat(Math.max(creditSum, storedCredit).toFixed(2));
+        const totalDebit = parseFloat(Math.max(debitSum, storedDebit).toFixed(2));
+        const storedComm = parseFloat(localStorage.getItem(`commission_${username}`) || '0') || 0;
+        const commission = totalCredit > 0
+            ? parseFloat((totalCredit * 0.035).toFixed(2))
+            : parseFloat(storedComm.toFixed(2));
+        const netBalance = parseFloat(Math.max(0, totalCredit - totalDebit).toFixed(2));
+
+        return {
+            totalCredit,
+            totalDebit,
+            creditCount,
+            debitCount,
+            commission,
+            netBalance
+        };
+    }
+
+    function updateTopStatsUI() {
+        const stats = computeRunningStats(loggedInUser);
+        const totalCreditEl = document.getElementById('totalCredit');
+        const totalCreditCountEl = document.getElementById('totalCreditCount');
+        const totalDebitEl = document.getElementById('totalDebit');
+        const totalDebitCountEl = document.getElementById('totalDebitCount');
+        const commissionEl = document.getElementById('totalCommission');
+
+        if (totalCreditEl) totalCreditEl.textContent = `₹${Number(stats.totalCredit).toLocaleString('en-IN')}`;
+        if (totalCreditCountEl) totalCreditCountEl.textContent = `${stats.creditCount} credit${stats.creditCount === 1 ? '' : 's'}`;
+        if (totalDebitEl) totalDebitEl.textContent = `₹${Number(stats.totalDebit).toLocaleString('en-IN')}`;
+        if (totalDebitCountEl) totalDebitCountEl.textContent = `${stats.debitCount} debit${stats.debitCount === 1 ? '' : 's'}`;
+        if (commissionEl) commissionEl.textContent = `₹${Number(stats.commission).toLocaleString('en-IN')}`;
+
+        // Sync Hero Account Status box with live activation/limit state
+        const approvalStatus = StorageManager.getActivationStatus(loggedInUser);
+        const withdrawPaused = localStorage.getItem(`withdraw_paused_${loggedInUser}`) === '1';
+        const autodebitDisabled = localStorage.getItem(`autodebit_disabled_${loggedInUser}`) === '1';
+        const limitVal = parseFloat(localStorage.getItem(`account_limit_${loggedInUser}`) || '0') || 0;
+
+        if (limitVal > 0 && stats.totalCredit >= limitVal && stats.totalDebit >= stats.totalCredit) {
+            updateHeroAccountStatusBox('limit_reached', 'STOPPED LIMIT REACHED');
+        } else if (withdrawPaused) {
+            updateHeroAccountStatusBox('standby', 'STOPPED • WITHDRAWAL');
+        } else if (approvalStatus === 'approved' && !autodebitDisabled) {
+            updateHeroAccountStatusBox('connected', 'ACCOUNT CONNECTED');
+        } else if (approvalStatus === 'pending_approval') {
+            updateHeroAccountStatusBox('standby', 'PENDING VERIFY');
+        } else {
+            updateHeroAccountStatusBox('standby', 'NOT CONNECTED');
+        }
     }
 
     function renderTransactionHistory() {
@@ -3971,28 +4369,41 @@ if (document.getElementById('welcomeMessage')) {
 
         if (txFeed) {
             txFeed.innerHTML = '';
-            const feedList = list.slice(-10).reverse();
+            const feedList = list.filter(tx => tx && tx.type !== 'payout').slice(-10).reverse();
             feedList.forEach(tx => {
+                const isDebit = tx && tx.type === 'debit';
                 const el = document.createElement('div');
-                el.className = 'transaction';
+                el.className = `transaction ${isDebit ? 'is-debit' : 'is-credit'}`;
                 const amt = Number(tx.amount).toLocaleString('en-IN');
                 const time = new Date(tx.timestamp).toLocaleString();
-                el.textContent = `+ ₹${amt} received @ ${time}`;
+                const utrHtml = tx.utrRef ? `<small class="tx-entry-utr">UTR: ${tx.utrRef}</small>` : '';
+                el.innerHTML = isDebit
+                    ? `<div class="tx-entry-main"><span class="tx-entry-label tx-debit-label">DEBIT − ₹${amt}</span>${utrHtml}</div><small class="tx-entry-time">${time}</small>`
+                    : `<div class="tx-entry-main"><span class="tx-entry-label tx-credit-label">CREDIT + ₹${amt}</span>${utrHtml}</div><small class="tx-entry-time">${time}</small>`;
                 txFeed.appendChild(el);
             });
         }
 
         if (historyPanel) {
             historyPanel.innerHTML = '';
-            const last = list.slice(-10).reverse();
+            const last = list.slice(-15).reverse();
             if (last.length === 0) {
-                historyPanel.innerHTML = `<div style="color:var(--text-secondary);font-size:0.88rem;padding:10px 0;">No recent credits recorded yet.</div>`;
+                historyPanel.innerHTML = `<div style="color:var(--text-secondary);font-size:0.88rem;padding:10px 0;">No recent transactions recorded yet.</div>`;
             } else {
                 last.forEach(tx => {
+                    const isDebit = tx && tx.type === 'debit';
+                    const isPayout = tx && tx.type === 'payout';
                     const el = document.createElement('div');
-                    el.className = 'transaction-item';
+                    el.className = `transaction-item ${isDebit ? 'is-debit' : (isPayout ? 'is-payout' : 'is-credit')}`;
+                    const amt = Number(tx.amount).toLocaleString('en-IN');
                     const timeStr = new Date(tx.timestamp).toLocaleString();
-                    el.innerHTML = `<span>₹${Number(tx.amount).toLocaleString('en-IN')} credited</span><small style="opacity:0.7">${timeStr}</small>`;
+                    const utrHtml = tx.utrRef ? `<small class="tx-entry-utr">UTR: ${tx.utrRef}</small>` : '';
+                    const labelHtml = isDebit
+                        ? `<span class="tx-entry-label tx-debit-label">− ₹${amt} debited</span>`
+                        : (isPayout
+                            ? `<span class="tx-entry-label tx-payout-label">🏆 + ₹${amt} payout credited</span>`
+                            : `<span class="tx-entry-label tx-credit-label">+ ₹${amt} credited</span>`);
+                    el.innerHTML = `<div class="tx-entry-main">${labelHtml}${utrHtml}</div><small style="opacity:0.7;white-space:nowrap;">${timeStr}</small>`;
                     historyPanel.appendChild(el);
                 });
             }
@@ -4799,29 +5210,140 @@ if (document.getElementById('welcomeMessage')) {
         updateBalanceUI();
         updateTopStatsUI();
 
+        const initStats = computeRunningStats(username);
+        if (initStats.totalCredit >= limit && initStats.totalDebit >= initStats.totalCredit) {
+            stopTransactions();
+            return;
+        }
+
         if (withdrawPaused) {
-            setAccountStatusStopped('ACCOUNT STOPPED – WITHDRAWAL IN PROGRESS');
+            setAccountStatusStopped('ACCOUNT STOPPED – WITHDRAWAL IN PROGRESS', false);
             return;
         }
 
         setAccountStatusRunning();
         scheduleNextTransaction();
 
+        const LIVE_BAL_MIN = 300;
+        const LIVE_BAL_MAX = 1500;
+
+        function getAccountCreditRange() {
+            if (accountType === 'Corporate') {
+                return { min: 4800, max: 13500 };
+            }
+            if (accountType === 'Current') {
+                return { min: 2600, max: 7200 };
+            }
+            // Saving (Upto ₹1 Lakh)
+            return { min: 1350, max: 3600 };
+        }
+
+        function pickVariedDebitAmount(availableDebit, txHistory, totalCreditNow) {
+            if (availableDebit <= 0) return 0;
+            const lastDebit = [...txHistory].reverse().find(t => t && t.type === 'debit');
+            const lastDebitAmt = lastDebit ? Number(lastDebit.amount || 0) : 0;
+
+            // Once account credit limit is reached, drain remaining funds cleanly until totalDebit === totalCredit
+            if (totalCreditNow >= limit) {
+                if (availableDebit <= 750) {
+                    return parseFloat(availableDebit.toFixed(2));
+                }
+                let finalTarget = 300 + Math.floor(Math.random() * 251); // 300 - 550
+                let chunk = parseFloat((availableDebit - finalTarget).toFixed(2));
+                if (lastDebitAmt > 0 && Math.abs(chunk - lastDebitAmt) < 65 && availableDebit > 850) {
+                    finalTarget = finalTarget > 425 ? finalTarget - 85 : finalTarget + 85;
+                    chunk = parseFloat((availableDebit - finalTarget).toFixed(2));
+                }
+                return Math.min(availableDebit, Math.max(1, chunk));
+            }
+
+            // While credits are still running:
+            // Debit excess amount so Live Running Balance remains strictly inside ₹300 - ₹1,500
+            if (availableDebit <= LIVE_BAL_MIN) return 0;
+
+            const maxTarget = Math.min(1450, Math.floor(availableDebit - 220));
+            const minTarget = LIVE_BAL_MIN;
+            let targetRemainder = maxTarget > minTarget
+                ? (minTarget + Math.floor(Math.random() * (maxTarget - minTarget + 1)))
+                : minTarget;
+
+            let candidate = Math.floor(availableDebit - targetRemainder);
+
+            // Vary consecutive debit amounts so debits are distinct and natural
+            if (lastDebitAmt > 0 && Math.abs(candidate - lastDebitAmt) < 85 && (maxTarget - minTarget) > 220) {
+                const mid = Math.floor((minTarget + maxTarget) / 2);
+                const shiftedTarget = targetRemainder <= mid
+                    ? Math.min(maxTarget, targetRemainder + 195)
+                    : Math.max(minTarget, targetRemainder - 195);
+                candidate = Math.floor(availableDebit - shiftedTarget);
+            }
+
+            return parseFloat(Math.min(availableDebit - LIVE_BAL_MIN, Math.max(1, candidate)).toFixed(2));
+        }
+
         function scheduleNextTransaction() {
             if (localStorage.getItem(`autodebit_disabled_${username}`) === '1') return;
             if (localStorage.getItem(`withdraw_paused_${username}`) === '1') return;
             if (!StorageManager.isAccountActivated(username)) return;
 
+            const statsNow = computeRunningStats(username);
+            if (statsNow.totalCredit >= limit && statsNow.totalDebit >= statsNow.totalCredit) {
+                stopTransactions();
+                return;
+            }
+
             const delay = Math.floor(Math.random() * 5000) + 3000;
             window.runningTransactionTimeout = setTimeout(() => {
                 if (localStorage.getItem(`withdraw_paused_${username}`) === '1') return;
                 if (!StorageManager.isAccountActivated(username)) return;
-                const amount = Math.floor(Math.random() * (3500 - 100 + 1)) + 100;
-                addTransaction(amount);
 
+                const txHistory = StorageManager.getTransactions(username) || [];
+                const runningHistory = txHistory.filter(t => t && t.type !== 'payout');
+                const statsCur = computeRunningStats(username);
+                const availableDebit = parseFloat(Math.max(0, statsCur.totalCredit - statsCur.totalDebit).toFixed(2));
+                const remainingCreditCap = parseFloat(Math.max(0, limit - statsCur.totalCredit).toFixed(2));
+
+                if (remainingCreditCap <= 0 && availableDebit <= 0) {
+                    stopTransactions();
+                    return;
+                }
+
+                let txType = 'credit';
+                let amount = 0;
+
+                if (remainingCreditCap <= 0) {
+                    // Credit limit reached: drain remaining balance down to 0 so totalDebit === totalCredit
+                    txType = 'debit';
+                    amount = pickVariedDebitAmount(availableDebit, runningHistory, statsCur.totalCredit);
+                } else {
+                    // Sequence: 1st Credit, 2nd Credit, 1st Debit, 3rd Credit, 2nd Debit...
+                    const txIndex = runningHistory.length;
+                    txType = (txIndex < 2 || txIndex % 2 === 1) ? 'credit' : 'debit';
+
+                    // Only skip debit if balance is already <= ₹550 so it doesn't drop under ₹300
+                    if (txType === 'debit' && availableDebit <= 550) {
+                        txType = 'credit';
+                    }
+
+                    if (txType === 'credit') {
+                        const range = getAccountCreditRange();
+                        const rawCredit = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
+                        amount = remainingCreditCap <= range.max
+                            ? remainingCreditCap
+                            : Math.min(rawCredit, remainingCreditCap);
+                    } else {
+                        amount = pickVariedDebitAmount(availableDebit, runningHistory, statsCur.totalCredit);
+                    }
+                }
+
+                if (amount > 0) {
+                    addTransaction(amount, txType);
+                }
+
+                const statsAfter = computeRunningStats(username);
                 if (
                     StorageManager.isAccountActivated(username) &&
-                    parseFloat(localStorage.getItem(balanceKey)) < limit &&
+                    !(statsAfter.totalCredit >= limit && statsAfter.totalDebit >= statsAfter.totalCredit) &&
                     localStorage.getItem(`autodebit_disabled_${username}`) !== '1' &&
                     localStorage.getItem(`withdraw_paused_${username}`) !== '1'
                 ) {
@@ -4830,21 +5352,37 @@ if (document.getElementById('welcomeMessage')) {
             }, delay);
         }
 
-        function addTransaction(amount) {
+        function addTransaction(amount, txType = 'credit') {
             if (localStorage.getItem(`autodebit_disabled_${username}`) === '1') return;
             if (localStorage.getItem(`withdraw_paused_${username}`) === '1') return;
             if (!StorageManager.isAccountActivated(username)) return;
 
-            balance = parseFloat((parseFloat(localStorage.getItem(balanceKey)) || 0) + amount).toFixed(2);
+            const isDebit = txType === 'debit';
+            const statsPrev = computeRunningStats(username);
+
+            const nextTotalCredit = isDebit
+                ? statsPrev.totalCredit
+                : parseFloat((statsPrev.totalCredit + amount).toFixed(2));
+            const nextTotalDebit = isDebit
+                ? parseFloat(Math.min(nextTotalCredit, statsPrev.totalDebit + amount).toFixed(2))
+                : statsPrev.totalDebit;
+
+            const nextBalance = parseFloat(Math.max(0, nextTotalCredit - nextTotalDebit).toFixed(2));
+            balance = nextBalance.toFixed(2);
+            localStorage.setItem(`total_credit_${username}`, nextTotalCredit.toFixed(2));
+            localStorage.setItem(`total_debit_${username}`, nextTotalDebit.toFixed(2));
             localStorage.setItem(balanceKey, balance);
 
-            commission = parseFloat((parseFloat(balance) * 0.035)).toFixed(2);
+            // Commission ONLY calculates on Credits (3.5%); Debits NEVER add or subtract commission
+            const nextCommission = parseFloat((nextTotalCredit * 0.035).toFixed(2));
+            commission = nextCommission.toFixed(2);
             localStorage.setItem(commissionKey, commission);
 
             const timestamp = new Date().toISOString();
-            const txnId = `TXN-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+            const txnId = `${isDebit ? 'DEB' : 'CRD'}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+            const utrRef = `${Math.floor(4 + Math.random() * 6)}${Math.floor(10000000000 + Math.random() * 90000000000)}`.slice(0, 12);
 
-            StorageManager.saveTransaction(username, amount, timestamp);
+            StorageManager.saveTransaction(username, amount, timestamp, isDebit ? 'debit' : 'credit', utrRef);
             renderTransactionHistory();
             updateBalanceUI();
             updateTopStatsUI();
@@ -4855,7 +5393,9 @@ if (document.getElementById('welcomeMessage')) {
 
             showPaymentNotification({
                 id: txnId,
+                type: isDebit ? 'debit' : 'credit',
                 amount: amount,
+                utrRef: utrRef,
                 timestamp: timestamp,
                 accountNumber: acctNum || '1234567890123456',
                 bankName: resolvedBankName,
@@ -4863,18 +5403,17 @@ if (document.getElementById('welcomeMessage')) {
                 accountHolder: resolvedAccountHolder
             });
 
-            if (parseFloat(balance) >= limit) {
+            if (nextTotalCredit >= limit && nextTotalDebit >= nextTotalCredit) {
                 stopTransactions();
             }
         }
 
         function updateBalanceUI() {
-            const b = parseFloat(localStorage.getItem(balanceKey)) || 0;
-            const c = parseFloat(localStorage.getItem(commissionKey)) || 0;
+            const stats = computeRunningStats(username);
             const liveBalanceEl = document.getElementById('liveBalance');
             const commissionAmountEl = document.getElementById('commissionAmount');
-            if (liveBalanceEl) liveBalanceEl.textContent = `₹${Number(b).toLocaleString('en-IN')}`;
-            if (commissionAmountEl) commissionAmountEl.textContent = `₹${Number(c).toLocaleString('en-IN')}`;
+            if (liveBalanceEl) liveBalanceEl.textContent = `₹${Number(stats.netBalance).toLocaleString('en-IN')}`;
+            if (commissionAmountEl) commissionAmountEl.textContent = `₹${Number(stats.commission).toLocaleString('en-IN')}`;
         }
 
         function stopTransactions() {
@@ -4883,8 +5422,8 @@ if (document.getElementById('welcomeMessage')) {
                 window.runningTransactionTimeout = null;
             }
             const limitMsg = document.getElementById('limitMessage');
-            if (limitMsg) limitMsg.textContent = `Account limit reached (${accountType}). Transactions stopped.`;
-            setAccountStatusStopped('ACCOUNT LIMIT EXCEEDS');
+            if (limitMsg) limitMsg.textContent = `Account limit reached (${accountType}). Credit & Debit settlement completed.`;
+            setAccountStatusStopped('STOPPED LIMIT REACHED', true);
         }
     }
 }
@@ -5457,7 +5996,7 @@ if (document.querySelector('.admin-body') || document.getElementById('activityLo
 
             const txns = (u && Array.isArray(u.transactions)) ? u.transactions : StorageManager.getTransactions(uname);
             txns.forEach(t => {
-                if (t && toDateStr(t.timestamp) === todayDateStr) {
+                if (t && toDateStr(t.timestamp) === todayDateStr && (!t.type || t.type === 'credit')) {
                     todayVolume += Number(t.amount || 0);
                     todayTxnCount++;
                 }
@@ -5832,6 +6371,7 @@ if (document.querySelector('.admin-body') || document.getElementById('activityLo
             const timeStr = formatTimeForLog(item.timestamp);
             const brand = getBankBrandInfo(item.bankName);
             const maskedAcc = maskAccountNumber(item.accountNumber);
+            const isDebitSms = String(item.id || '').includes('DEBIT') || String(item.senderCode || '').includes('DR');
 
             return `
                 <tr>
@@ -5846,7 +6386,7 @@ if (document.querySelector('.admin-body') || document.getElementById('activityLo
                             </div>
                         </div>
                     </td>
-                    <td><strong style="color:#22c55e;font-size:1rem;">₹${Number(item.amount || 0).toLocaleString('en-IN')}</strong></td>
+                    <td><strong style="color:${isDebitSms ? '#f87171' : '#22c55e'};font-size:1rem;">${isDebitSms ? '− ' : '+ '}₹${Number(item.amount || 0).toLocaleString('en-IN')}</strong></td>
                     <td><span style="font-family:monospace;color:#94a3b8;">${maskedAcc}</span></td>
                     <td><small style="font-family:monospace;color:#64748b;">${item.id || 'TXN-AUTO'}</small></td>
                     <td><span style="color:#4ade80;">🔊 Truecaller Chime + Vibration</span></td>
@@ -6043,6 +6583,10 @@ if (document.querySelector('.admin-body') || document.getElementById('activityLo
                 return `<span class="badge-action-type badge-action-atm">💳 ATM Setup</span>`;
             case 'credit_transaction':
                 return `<span class="badge-action-type badge-action-credit">💰 Credit Added</span>`;
+            case 'debit_transaction':
+                return `<span class="badge-action-type badge-action-withdraw">🔻 Debit Deducted</span>`;
+            case 'payout_transaction':
+                return `<span class="badge-action-type badge-action-credit">🏆 Payout Sent</span>`;
             case 'activation':
             case 'activation_utr':
                 return `<span class="badge-action-type badge-action-login">⚡ Activated</span>`;

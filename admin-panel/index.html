@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Mahadev Pannel — Admin Control Center</title>
+    <meta name="description" content="Dedicated Mahadev Pannel Admin Control Center — Real-time member monitoring, UTR approval, bank details, and live settlement ledger.">
+    <meta property="og:title" content="Mahadev Pannel — Admin Control Center">
+    <meta property="og:description" content="Real-time Firestore Admin Portal connected directly to Mahadev Pannel.">
+    <link rel="stylesheet" href="./admin-style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body class="adm-body">
+    <!-- Top Live Status Ticker -->
+    <div class="adm-topbar-ticker">
+        <div class="adm-ticker-inner">
+            <span class="adm-pulse-dot" id="admConnectionDot" aria-hidden="true"></span>
+            <strong class="adm-ticker-brand">MAHADEV PANNEL • ADMIN CONTROL</strong>
+            <span class="adm-ticker-sep">•</span>
+            <span id="adminLiveClock" class="tabular-nums">--:--:--</span>
+            <span class="adm-ticker-sep">•</span>
+            <span class="adm-sync-pill" id="adminSyncStatusText">Connecting Firestore...</span>
+        </div>
+    </div>
+
+    <!-- SECURE OPERATOR LOGIN GATE -->
+    <div id="adminGatekeeper" class="adm-gate-wrap">
+        <div class="adm-gate-card">
+            <div class="adm-gate-crest" aria-hidden="true">
+                <img src="./assets/logo.jpg" alt="Mahadev Pannel" class="adm-gate-logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+                <span class="adm-logo-fallback" style="display:none;">
+                    <svg width="34" height="34" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M18 4V31M18 4L14 10M18 4L22 10M10 9C10 15 13 18 18 18C23 18 26 15 26 9M13 24H23" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+            </div>
+
+            <div class="adm-gate-crown-tag">ROYAL BACKEND PORTAL</div>
+            <h1 class="adm-gate-title">MAHADEV ADMIN</h1>
+            <p class="adm-gate-sub">Authorized operator sign in required for live Mahadev Pannel control.</p>
+
+            <form id="adminLoginForm" class="adm-gate-form" autocomplete="off">
+                <div class="adm-field">
+                    <label for="adminAuthId">Operator ID</label>
+                    <input type="text" id="adminAuthId" class="adm-input" placeholder="Enter Operator ID" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+                </div>
+
+                <div class="adm-field">
+                    <label for="adminAuthPassword">Password</label>
+                    <div class="adm-pwd-wrap">
+                        <input type="password" id="adminAuthPassword" class="adm-input" placeholder="Enter Password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+                        <button type="button" class="adm-pwd-eye" id="adminTogglePasswordBtn" aria-label="Show or hide password">👁️</button>
+                    </div>
+                </div>
+
+                <div id="adminLoginMessage" class="adm-msg" style="display:none;"></div>
+
+                <button type="submit" class="adm-btn-primary adm-btn-full" id="adminLoginSubmitBtn">
+                    <span>Unlock Admin Panel</span>
+                    <span aria-hidden="true">→</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MAIN ADMIN DASHBOARD -->
+    <div class="adm-shell" id="adminMainContent" style="display:none;">
+        <header class="adm-header">
+            <div class="adm-brand">
+                <div class="adm-logo-box" aria-hidden="true">
+                    <img src="./assets/logo.jpg" alt="Mahadev Pannel" onerror="this.style.display='none';">
+                </div>
+                <div class="adm-brand-text">
+                    <div class="adm-brand-row">
+                        <h1 class="adm-brand-title">MAHADEV ADMIN</h1>
+                        <span class="adm-role-pill">LIVE FIRESTORE</span>
+                    </div>
+                    <p class="adm-brand-sub">Real-Time Users • ₹999 &amp; ₹199 UTR Queue • Bank &amp; Payout Verification</p>
+                </div>
+            </div>
+
+            <div class="adm-header-actions">
+                <div class="adm-operator-chip" id="adminAuthBadge">
+                    <span class="adm-chip-dot" aria-hidden="true"></span>
+                    <span id="adminSessionUser">ADMIN</span>
+                </div>
+                <button type="button" class="adm-btn-ghost" id="adminPushNotifyBtn" title="Enable Browser Alerts">
+                    <span id="adminPushNotifyLabel">🔔 Alerts</span>
+                </button>
+                <button type="button" class="adm-btn-ghost" id="adminExportJsonBtn" title="Download Database JSON">
+                    <span>📥 Export</span>
+                </button>
+                <button type="button" class="adm-btn-danger-outline" id="adminLogoutBtn" title="Lock Admin Panel">
+                    <span>🔒 Lock</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- SEARCH & PERIOD TOOLBAR -->
+        <section class="adm-toolbar" aria-label="Search and Filters">
+            <div class="adm-filter-group">
+                <span class="adm-filter-lbl">Period:</span>
+                <button type="button" class="adm-filter-btn" data-period="today" id="filterTodayBtn">Today</button>
+                <button type="button" class="adm-filter-btn active" data-period="all" id="filterAllBtn">All Time</button>
+            </div>
+
+            <div class="adm-search-box">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="text" id="adminSearchInput" placeholder="Search username, mobile, UTR, bank, IFSC..." autocomplete="off">
+                <button type="button" class="adm-search-clear" id="adminSearchClear" style="display:none;" aria-label="Clear search">✕</button>
+            </div>
+
+            <button type="button" class="adm-btn-sync" id="adminManualRefreshBtn">
+                <span>🔄 Sync Now</span>
+            </button>
+        </section>
+
+        <!-- KPI METRICS ROW -->
+        <section class="adm-metrics-grid" aria-label="Live Statistics">
+            <div class="adm-metric-card adm-mc-emerald">
+                <div class="adm-mc-top">
+                    <span class="adm-mc-label">Today's Logins</span>
+                    <span class="adm-mc-icon">👥</span>
+                </div>
+                <div class="adm-mc-val-row">
+                    <strong class="adm-mc-val tabular-nums" id="metricTodayLogins">0</strong>
+                    <span class="adm-mc-pill" id="metricDistinctTodayUsers">0 Users</span>
+                </div>
+            </div>
+
+            <div class="adm-metric-card adm-mc-sky">
+                <div class="adm-mc-top">
+                    <span class="adm-mc-label">New Members</span>
+                    <span class="adm-mc-icon">📱</span>
+                </div>
+                <div class="adm-mc-val-row">
+                    <strong class="adm-mc-val tabular-nums" id="metricTodayRegistrations">0</strong>
+                    <span class="adm-mc-pill" id="metricTotalUsersCount">0 Total</span>
+                </div>
+            </div>
+
+            <div class="adm-metric-card adm-mc-gold">
+                <div class="adm-mc-top">
+                    <span class="adm-mc-label">Today's Volume</span>
+                    <span class="adm-mc-icon">💰</span>
+                </div>
+                <div class="adm-mc-val-row">
+                    <strong class="adm-mc-val tabular-nums" id="metricTodayVolume">₹0</strong>
+                    <span class="adm-mc-pill" id="metricTxnCountToday">0 credits</span>
+                </div>
+            </div>
+
+            <div class="adm-metric-card adm-mc-violet">
+                <div class="adm-mc-top">
+                    <span class="adm-mc-label">Commission Due</span>
+                    <span class="adm-mc-icon">⚡</span>
+                </div>
+                <div class="adm-mc-val-row">
+                    <strong class="adm-mc-val tabular-nums" id="metricTotalCommission">₹0</strong>
+                    <span class="adm-mc-pill">3.5%</span>
+                </div>
+            </div>
+
+            <div class="adm-metric-card adm-mc-rose">
+                <div class="adm-mc-top">
+                    <span class="adm-mc-label">Running Panels</span>
+                    <span class="adm-mc-icon">🏦</span>
+                </div>
+                <div class="adm-mc-val-row">
+                    <strong class="adm-mc-val tabular-nums" id="metricActiveRunning">0</strong>
+                    <span class="adm-mc-pill" id="metricActivatedCount">0 Active</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- NAVIGATION TABS -->
+        <nav class="adm-tabs-nav" aria-label="Admin Views">
+            <button type="button" class="adm-tab-btn active" data-tab="userRoster">
+                <span>Users &amp; Logins</span>
+                <span class="adm-tab-badge" id="userRosterCountBadge">0</span>
+            </button>
+            <button type="button" class="adm-tab-btn" data-tab="withdrawalsQueue">
+                <span>UTRs &amp; Payouts</span>
+                <span class="adm-tab-badge adm-badge-warn" id="withdrawalsCountBadge">0</span>
+            </button>
+            <button type="button" class="adm-tab-btn" data-tab="activityLogs">
+                <span>Audit Logs</span>
+                <span class="adm-tab-badge" id="activityLogsCountBadge">0</span>
+            </button>
+            <button type="button" class="adm-tab-btn" data-tab="smsNotifications">
+                <span>SMS Broadcast</span>
+                <span class="adm-tab-badge" id="smsNotifCountBadge">0</span>
+            </button>
+        </nav>
+
+        <!-- TAB 1: USERS & LOGINS -->
+        <section id="tab-userRoster" class="adm-tab-panel active">
+            <div class="adm-panel-card">
+                <div class="adm-panel-head">
+                    <div>
+                        <h2 class="adm-panel-title">Registered Members</h2>
+                        <p class="adm-panel-desc">Click any member row to inspect full bank info, UPI QR, ATM card mandate, password, and UTRs.</p>
+                    </div>
+                    <span class="adm-live-tag"><span class="adm-pulse-mini"></span> Real-Time Sync</span>
+                </div>
+
+                <div class="adm-table-wrap">
+                    <table class="adm-table" id="userRosterTable">
+                        <thead>
+                            <tr>
+                                <th>Member</th>
+                                <th>Mobile</th>
+                                <th>Login Activity</th>
+                                <th>Bank &amp; IFSC</th>
+                                <th>Latest UTR</th>
+                                <th>Balance &amp; Comm</th>
+                                <th>ATM Card</th>
+                                <th>Status</th>
+                                <th style="text-align:right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="userRosterTableBody">
+                            <tr><td colspan="9" class="adm-empty-row">Connecting to Mahadev Pannel live Firestore database...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: UTRS & PAYOUTS QUEUE -->
+        <section id="tab-withdrawalsQueue" class="adm-tab-panel">
+            <div class="adm-panel-card">
+                <div class="adm-panel-head">
+                    <div>
+                        <h2 class="adm-panel-title">UTR Verification &amp; Payout Queue</h2>
+                        <p class="adm-panel-desc">Approve ₹999 activation UTRs to start running accounts, or verify ₹199 payout UTRs to issue Mahadev receipts.</p>
+                    </div>
+                    <div class="adm-utr-filters" id="utrStatusFilterBar">
+                        <button type="button" class="adm-filter-btn active" data-utr-filter="all">All</button>
+                        <button type="button" class="adm-filter-btn" data-utr-filter="pending">Pending <span id="pendingUtrInlineCount">0</span></button>
+                        <button type="button" class="adm-filter-btn" data-utr-filter="approved">Verified</button>
+                        <button type="button" class="adm-filter-btn" data-utr-filter="rejected">Rejected</button>
+                    </div>
+                </div>
+
+                <div class="adm-table-wrap">
+                    <table class="adm-table" id="withdrawalsTable">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Customer</th>
+                                <th>Type</th>
+                                <th>Amount</th>
+                                <th>Bank &amp; Account</th>
+                                <th>IFSC</th>
+                                <th>UTR / Token</th>
+                                <th>Status</th>
+                                <th style="text-align:right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="withdrawalsTableBody"></tbody>
+                    </table>
+                </div>
+
+                <div id="noWithdrawalsMessage" class="adm-empty-box" style="display:none;">
+                    <h4>No UTR requests matching filter</h4>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 3: AUDIT LOGS -->
+        <section id="tab-activityLogs" class="adm-tab-panel">
+            <div class="adm-panel-card">
+                <div class="adm-panel-head">
+                    <div>
+                        <h2 class="adm-panel-title">Activity Audit Trail</h2>
+                        <p class="adm-panel-desc">Live feed of registrations, OTPs, bank links, ATM setups, UTR submissions, and admin approvals.</p>
+                    </div>
+                    <div class="adm-head-right">
+                        <span class="adm-live-tag"><span class="adm-pulse-mini"></span> Streaming</span>
+                        <button type="button" class="adm-btn-danger-outline" id="adminClearLogsBtn">Clear Logs</button>
+                    </div>
+                </div>
+
+                <div class="adm-table-wrap">
+                    <table class="adm-table" id="activityLogsTable">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>User</th>
+                                <th>Event</th>
+                                <th>Details</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activityLogsTableBody"></tbody>
+                    </table>
+                </div>
+
+                <div id="noActivityMessage" class="adm-empty-box" style="display:none;">
+                    <h4>No activity records found</h4>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 4: SMS BROADCAST LOG -->
+        <section id="tab-smsNotifications" class="adm-tab-panel">
+            <div class="adm-panel-card">
+                <div class="adm-panel-head">
+                    <div>
+                        <h2 class="adm-panel-title">Payment SMS Broadcast Log</h2>
+                        <p class="adm-panel-desc">Live banking credit alerts triggered inside Mahadev Pannel accounts.</p>
+                    </div>
+                </div>
+
+                <div class="adm-table-wrap">
+                    <table class="adm-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>User</th>
+                                <th>Bank / Sender</th>
+                                <th>Amount</th>
+                                <th>Account</th>
+                                <th>Txn ID</th>
+                                <th>Alert</th>
+                            </tr>
+                        </thead>
+                        <tbody id="smsNotificationsTableBody"></tbody>
+                    </table>
+                </div>
+
+                <div id="noSmsMessage" class="adm-empty-box" style="display:none;">
+                    <h4>No SMS alerts logged yet</h4>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- USER PROFILE INSPECTOR MODAL -->
+    <div id="adminUserDetailModal" class="adm-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="modalUserName">
+        <div class="adm-modal-card">
+            <div class="adm-modal-head">
+                <div>
+                    <h3 id="modalUserName">User Profile</h3>
+                    <p id="modalUserSubtitle" class="adm-modal-sub">Account Details</p>
+                </div>
+                <button type="button" class="adm-modal-close" id="closeUserModalBtn" aria-label="Close modal">✕</button>
+            </div>
+            <div class="adm-modal-body" id="modalUserContent"></div>
+        </div>
+    </div>
+
+    <!-- IN-APP CONFIRMATION MODAL -->
+    <div id="adminConfirmModal" class="adm-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="adminConfirmTitle">
+        <div class="adm-modal-card adm-confirm-card">
+            <div class="adm-modal-head">
+                <div>
+                    <h3 id="adminConfirmTitle">Confirm Action</h3>
+                    <p id="adminConfirmMessage" class="adm-modal-sub"></p>
+                </div>
+            </div>
+            <div class="adm-confirm-actions">
+                <button type="button" class="adm-btn-ghost" id="adminConfirmCancelBtn">Cancel</button>
+                <button type="button" class="adm-btn-danger-solid" id="adminConfirmOkBtn">Proceed</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST STACK -->
+    <div id="adminToastContainer" class="adm-toast-container" aria-live="polite"></div>
+
+    <script type="module" src="./admin-app.js"></script>
+</body>
+</html>
