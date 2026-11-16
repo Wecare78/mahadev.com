@@ -537,6 +537,9 @@ async function bootstrapCdnFirebaseStore() {
                     await fsMod.deleteDoc(fsMod.doc(db, 'users', user.docId));
                     return true;
                 },
+                async logActivity(u, actionType, details, category = 'general', status = 'success') {
+                    return writeAct(u, actionType, details, category, status);
+                },
                 async adminClearLogs() {
                     const snap = await fsMod.getDocs(fsMod.collection(db, 'activityLogs'));
                     await Promise.all(snap.docs.map((d) => fsMod.deleteDoc(d.ref)));
@@ -557,7 +560,7 @@ async function bootstrapCdnFirebaseStore() {
 }
 
 const IS_VITE_ENV = typeof import.meta !== 'undefined' && Boolean(import.meta.env);
-const IS_STATIC_HOST = typeof window !== 'undefined' && (/\.github\.io$/i.test(window.location.hostname) || window.location.protocol === 'file:');
+const IS_STATIC_HOST = typeof window !== 'undefined' && (!IS_VITE_ENV || /\.github\.io$/i.test(window.location.hostname) || window.location.protocol === 'file:');
 
 async function getFirebaseStore() {
     if (window.FirebaseStore) return window.FirebaseStore;

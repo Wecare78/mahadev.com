@@ -1,5 +1,5 @@
-import express, { Request, Response } from 'express';
-import { createServer as createViteServer } from 'vite';
+import express from 'express';
+import type { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'node:crypto';
@@ -292,9 +292,13 @@ const IFSC_DICTIONARY: Record<string, { bank: string; branch: string }> = {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json({ limit: '15mb' }));
+
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({ ok: true });
+  });
 
   // ----------------------------------------
   // 1. REAL SMS OTP SEND & VERIFY API (Server Gateway Fallback)
@@ -1008,8 +1012,9 @@ async function startServer() {
       }
       next();
     });
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'mpa',
     });
     app.use(vite.middlewares);
