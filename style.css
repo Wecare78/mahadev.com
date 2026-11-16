@@ -283,6 +283,146 @@ body {
     background: rgba(239, 68, 68, 0.24);
 }
 
+/* Header Panel Wallet Balance Box */
+.mp-header-wallet-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 10px 4px 8px;
+    border-radius: 11px;
+    background: linear-gradient(145deg, rgba(17, 24, 39, 0.96), rgba(30, 41, 59, 0.92));
+    border: 1.25px solid rgba(251, 191, 36, 0.52);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(254, 240, 138, 0.16);
+    transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+    flex-shrink: 0;
+}
+
+.mp-header-wallet-box.is-wallet-funded {
+    border-color: rgba(52, 211, 153, 0.65);
+    background: linear-gradient(145deg, rgba(6, 78, 59, 0.42), rgba(15, 23, 42, 0.95));
+    box-shadow: 0 4px 16px rgba(16, 185, 129, 0.22), inset 0 1px 0 rgba(167, 243, 208, 0.2);
+}
+
+.mp-header-wallet-box.is-wallet-notify {
+    border-color: #FDE047;
+    animation: mpWalletNotifyPulse 1.35s ease-in-out infinite;
+}
+
+.mp-header-wallet-box.is-wallet-pulse {
+    animation: mpWalletCreditFlash 0.9s ease;
+}
+
+@keyframes mpWalletNotifyPulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.65), 0 6px 18px rgba(245, 158, 11, 0.35);
+        transform: scale(1);
+    }
+    50% {
+        box-shadow: 0 0 0 6px rgba(251, 191, 36, 0), 0 6px 24px rgba(251, 191, 36, 0.55);
+        transform: scale(1.03);
+    }
+}
+
+@keyframes mpWalletCreditFlash {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.08); box-shadow: 0 0 24px rgba(52, 211, 153, 0.65); }
+    100% { transform: scale(1); }
+}
+
+.mp-wallet-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    background: rgba(251, 191, 36, 0.16);
+    border: 1px solid rgba(251, 191, 36, 0.36);
+    color: #FBBF24;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.mp-header-wallet-box.is-wallet-funded .mp-wallet-icon {
+    background: rgba(16, 185, 129, 0.18);
+    border-color: rgba(52, 211, 153, 0.45);
+    color: #34D399;
+}
+
+.mp-wallet-copy {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.05;
+}
+
+.mp-wallet-lbl {
+    font-size: 0.52rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #FDE68A;
+    text-transform: uppercase;
+}
+
+.mp-wallet-val {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: #FFFFFF;
+    white-space: nowrap;
+}
+
+.mp-wallet-pointer-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border-radius: 10px;
+    background: rgba(251, 191, 36, 0.12);
+    border: 1px dashed rgba(251, 191, 36, 0.55);
+    color: #FDE68A;
+    font-size: 0.76rem;
+    font-weight: 600;
+    margin: 4px 0 12px;
+    text-align: center;
+}
+
+.mp-wallet-deposit-info {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    text-align: left;
+    background: rgba(8, 13, 24, 0.75);
+    border: 1px solid rgba(251, 191, 36, 0.28);
+    border-radius: 14px;
+    padding: 13px 14px;
+    margin-bottom: 16px;
+}
+
+.mp-wdi-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: #E2E8F0;
+}
+
+.mp-wdi-dot {
+    width: 19px;
+    height: 19px;
+    border-radius: 50%;
+    background: rgba(16, 185, 129, 0.18);
+    border: 1px solid rgba(52, 211, 153, 0.45);
+    color: #34D399;
+    font-size: 0.68rem;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
 /* =====================================================
    ROYAL AUTH SHELL & SHIVA HERO BANNER
    ===================================================== */
@@ -3269,6 +3409,19 @@ input[type="file"] {
     overflow: hidden;
 }
 
+.tc-notif-slot.tc-slot-replacing {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1;
+    margin-bottom: 0 !important;
+    opacity: 0;
+    transform: translate3d(0, -18px, 0) scale(0.95);
+    pointer-events: none;
+    transition: transform 0.18s ease, opacity 0.16s ease;
+}
+
 .tc-notification-card {
     pointer-events: auto;
     background: #FFFFFF;
@@ -4316,27 +4469,54 @@ input[type="file"] {
         font-size: 0.62rem;
     }
     .mp-topbar-inner {
-        padding: 0 10px;
+        padding: 0 8px;
         gap: 6px;
     }
     .mp-brand {
-        gap: 7px;
+        gap: 6px;
     }
     .mp-brand-name {
-        font-size: 0.82rem;
-        letter-spacing: 0.05em;
+        font-size: 0.74rem;
+        letter-spacing: 0.04em;
+    }
+    .mp-brand-sub {
+        font-size: 0.52rem;
     }
     .mp-pure-fund-pill {
         display: none;
     }
     .mp-topbar-actions {
-        gap: 6px;
+        gap: 5px;
     }
-    .mp-support-btn,
+    .mp-header-wallet-box {
+        padding: 3px 7px 3px 6px;
+        gap: 5px;
+    }
+    .mp-wallet-icon {
+        width: 22px;
+        height: 22px;
+    }
+    .mp-wallet-icon svg {
+        width: 13px;
+        height: 13px;
+    }
+    .mp-wallet-lbl {
+        font-size: 0.46rem;
+    }
+    .mp-wallet-val {
+        font-size: 0.68rem;
+    }
+    .mp-support-btn span {
+        display: none;
+    }
+    .mp-support-btn {
+        padding: 0 8px;
+        height: 30px;
+    }
     .mp-logout-btn {
-        height: 31px;
-        padding: 0 10px;
-        font-size: 0.72rem;
+        height: 30px;
+        padding: 0 8px;
+        font-size: 0.68rem;
     }
 }
 

@@ -42,6 +42,19 @@
             </div>
 
             <div class="mp-topbar-actions">
+                <div class="mp-header-wallet-box" id="headerWalletBox" title="Panel Wallet Balance (₹999 + 3.5% Commission)">
+                    <span class="mp-wallet-icon" aria-hidden="true">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"/>
+                            <path d="M3 7h18v10a2 2 0 0 1-2 2"/>
+                            <path d="M16 12h5v4h-5a2 2 0 0 1 0-4z"/>
+                        </svg>
+                    </span>
+                    <div class="mp-wallet-copy">
+                        <span class="mp-wallet-lbl">PANEL WALLET</span>
+                        <strong class="mp-wallet-val tabular-nums" id="headerWalletBalance">INR 0.00</strong>
+                    </div>
+                </div>
                 <button type="button" class="mp-support-btn" id="dashboardSupportBtn" title="Support" aria-label="Support">
                     <svg width="15" height="15" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M16 0C7.16 0 0 7.16 0 16s7.16 16 16 16 16-7.16 16-16-7.16-16-16-16zm7.69 10.94l-1.18 5.57c-.09.44-.32.57-.65.57-.36 0-1.02-.18-1.59-.35 1.21.79 2.13 1.28 3.01 1.73.32.17.51.43.44.71l-.83 5.44c-.09.49-.48.62-.98.41-2.31-1.29-3.71-2.07-5.02-3.22-.94.85-2.09 1.9-3.21 2.96-.38.35-.7.48-1.05.15l-.56-3.75c-.06-.4.08-.63.49-.78 2.36-.77 4.81-1.57 6.94-2.69-1.72-1.57-3.48-3.16-4.63-4.23-.4-.37-.26-.93.24-1.15l3.65-.82c.35-.08.65.07.82.38l2.15 4.39c.12.24.31.35.54.29.57-.16 1.21-.37 1.82-.59.27-.1.48.04.53.31z" fill="currentColor"/>
@@ -368,14 +381,33 @@
             </div>
         </div>
 
-        <!-- STEP 3: ACTIVATION PAYMENT -->
+        <!-- STEP 3: ACTIVATION / PANEL WALLET DEPOSIT -->
         <div class="dashboard-section hidden" id="activationPaymentSection">
             <div class="card mp-app-card mp-royal-card mp-center-card">
                 <span class="mp-secure-tag">Step 3 / 5</span>
-                <h3>Pay One Time Activation Charges</h3>
-                <p class="muted">Complete ₹999 UPI verification to unlock live transactions after Admin approval.</p>
+                <h3>Add Minimum ₹999 to Panel Wallet</h3>
+
+                <div class="mp-wallet-pointer-pill">
+                    <span>↑ Adds directly to your Top Header <strong>PANEL WALLET</strong> (highlighted above)</span>
+                </div>
+
+                <div class="mp-wallet-deposit-info">
+                    <div class="mp-wdi-row">
+                        <span class="mp-wdi-dot">✓</span>
+                        <span><strong>Minimum ₹999 Required:</strong> To start running your account, add a minimum of <strong>₹999</strong> to your Panel Wallet.</span>
+                    </div>
+                    <div class="mp-wdi-row">
+                        <span class="mp-wdi-dot">✓</span>
+                        <span><strong>Credited to Your Wallet:</strong> The ₹999 amount you pay is added directly into your top header Panel Wallet.</span>
+                    </div>
+                    <div class="mp-wdi-row">
+                        <span class="mp-wdi-dot">✓</span>
+                        <span><strong>Withdraw Anytime:</strong> This ₹999 balance remains 100% yours and can be withdrawn anytime.</span>
+                    </div>
+                </div>
+
                 <button type="button" class="btn btn-primary btn-large mp-royal-cta-btn" id="activationPaymentBtn">
-                    <span>Pay ₹999 via UPI</span>
+                    <span>Add ₹999 in Pannel Wallet</span>
                     <span class="mp-cta-arrow" aria-hidden="true">→</span>
                 </button>
             </div>
@@ -385,12 +417,12 @@
         <div class="dashboard-section hidden" id="activationCodeUpiSection">
             <div class="card mp-app-card mp-royal-card">
                 <div class="mp-card-head">
-                    <h3>UPI Activation</h3>
+                    <h3>Add to Panel Wallet</h3>
                     <span class="mp-amount-pill">₹999</span>
                 </div>
 
                 <div class="mp-charge-banner">
-                    <span>⚡ Pay One Time Activation Charges — <strong>₹999</strong></span>
+                    <span>⚡ Add Minimum <strong>₹999</strong> in Pannel Wallet — Credited to Header Wallet after Admin UTR Verification</span>
                 </div>
 
                 <div class="upi-section" id="activationUpiSelectorGroup">
@@ -602,6 +634,9 @@
                 <div class="mp-card-head">
                     <h3>Commission Payout</h3>
                     <span class="mp-secure-tag">Step 5 / 5</span>
+                </div>
+                <div class="mp-charge-banner" id="withdrawWalletSummaryBanner" style="margin-bottom:12px;">
+                    <span>Wallet Payout Amount: <strong id="withdrawWalletAmountDisplay" class="mono-font">INR 0.00</strong></span>
                 </div>
                 <form id="withdrawCommissionForm">
                     <div class="form-group">

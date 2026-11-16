@@ -1051,6 +1051,7 @@ const StorageManager = {
         localStorage.removeItem(`commission_${username}`);
         localStorage.removeItem(`total_credit_${username}`);
         localStorage.removeItem(`total_debit_${username}`);
+        localStorage.removeItem(`wallet_999_credited_${username}`);
         localStorage.removeItem(`activationCode_${username}`);
         localStorage.removeItem(`account_last4_${username}`);
         localStorage.removeItem(`transactions_${username}`);
@@ -2039,12 +2040,24 @@ function showPaymentNotification(transaction) {
     }
     bindPaymentNotificationAudioObserver(container);
 
-    // Keep stack clean (max 3 active cards at a time; gracefully dismiss oldest)
-    const activeSlots = Array.from(container.querySelectorAll('.tc-notif-slot:not(.tc-slot-collapsing)'));
-    while (activeSlots.length >= 3) {
-        const oldestSlot = activeSlots.pop();
-        if (oldestSlot) dismissNotificationSlot(oldestSlot, 'up');
-    }
+    // Replace any existing notification immediately when a new one arrives (strictly 1 notification at a time)
+    const existingSlots = Array.from(container.querySelectorAll('.tc-notif-slot'));
+    existingSlots.forEach((oldSlot) => {
+        if (oldSlot._autoTimer) {
+            clearTimeout(oldSlot._autoTimer);
+            oldSlot._autoTimer = null;
+        }
+        if (oldSlot._removeTimer) {
+            clearTimeout(oldSlot._removeTimer);
+            oldSlot._removeTimer = null;
+        }
+        oldSlot.classList.add('tc-slot-replacing');
+        oldSlot._removeTimer = setTimeout(() => {
+            if (oldSlot && oldSlot.parentNode) {
+                oldSlot.parentNode.removeChild(oldSlot);
+            }
+        }, 190);
+    });
 
     const slot = document.createElement('div');
     slot.className = 'tc-notif-slot tc-slot-entering';
@@ -3343,6 +3356,75 @@ if (document.getElementById('welcomeMessage')) {
         return (utrs || []).find(u => isUpgrade199Record(u) && isUtrApproved(u)) || null;
     }
 
+    function isActivation999Record(u) {
+        if (!u || isUpgrade199Record(u)) return false;
+        const typeStr = String(u.type || '').toLowerCase();
+        return Number(u.amount) === 999 || typeStr.includes('999') || typeStr.includes('activation');
+    }
+
+    function hasApproved999WalletDeposit(userObj = StorageManager.getUser(loggedInUser), userUtrs = latestUserUtrs) {
+        const utrs = Array.isArray(userUtrs) ? userUtrs : [];
+        const approved999List = utrs.filter(u => isActivation999Record(u) && isUtrApproved(u));
+        const approved199List = utrs.filter(u => isUpgrade199Record(u) && isUtrApproved(u));
+
+        const latest999Ts = approved999List[0] ? new Date(approved999List[0].timestamp || 0).getTime() : 0;
+        const latest199 = approved199List[0] || null;
+        const latest199Ts = latest199 ? new Date(latest199.timestamp || 0).getTime() : 0;
+
+        // Once a withdrawal (₹199) UTR verification is approved/completed covering this cycle, wallet deposit resets to 0.00
+        if (latest199 && latest199Ts >= latest999Ts) {
+            return false;
+        }
+        const clearedWithdrawId = localStorage.getItem(`wallet_cleared_by_withdraw_${loggedInUser}`);
+        if (clearedWithdrawId && latest999Ts === 0) {
+            return false;
+        }
+
+        const hasApproved999Utr = approved999List.length > 0;
+        const userActivated = Boolean(userObj && (userObj.activated || userObj.activationStatus === 'approved'));
+        if (hasApproved999Utr || userActivated) {
+            if (userObj && userObj.accountDetails) {
+                localStorage.setItem(`wallet_999_credited_${loggedInUser}`, '1');
+            }
+            return true;
+        }
+        return Boolean(userObj && userObj.accountDetails && localStorage.getItem(`wallet_999_credited_${loggedInUser}`) === '1');
+    }
+
+    function getCurrentPanelWalletAmount(statsInput = null, userObj = StorageManager.getUser(loggedInUser), userUtrs = latestUserUtrs) {
+        const stats = statsInput || (typeof computeRunningStats === 'function' ? computeRunningStats(loggedInUser) : { commission: 0 });
+        const depositCredited = hasApproved999WalletDeposit(userObj, userUtrs);
+        const baseDeposit = depositCredited ? 999 : 0;
+        const liveCommission = depositCredited ? Number(stats.commission || 0) : 0;
+        return parseFloat((baseDeposit + liveCommission).toFixed(2));
+    }
+
+    function updateHeaderWalletBox(statsInput = null, userObj = StorageManager.getUser(loggedInUser), userUtrs = latestUserUtrs) {
+        const walletValEl = document.getElementById('headerWalletBalance');
+        const walletBoxEl = document.getElementById('headerWalletBox');
+        if (!walletValEl) return;
+
+        const depositCredited = hasApproved999WalletDeposit(userObj, userUtrs);
+        const totalWallet = getCurrentPanelWalletAmount(statsInput, userObj, userUtrs);
+
+        walletValEl.textContent = `INR ${totalWallet.toLocaleString('en-IN', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        })}`;
+
+        if (walletBoxEl) {
+            walletBoxEl.classList.toggle('is-wallet-funded', depositCredited);
+            const wasCredited = walletBoxEl.getAttribute('data-wallet-credited') === '1';
+            if (depositCredited && !wasCredited) {
+                walletBoxEl.setAttribute('data-wallet-credited', '1');
+                walletBoxEl.classList.add('is-wallet-pulse');
+                setTimeout(() => walletBoxEl.classList.remove('is-wallet-pulse'), 1400);
+            } else if (!depositCredited) {
+                walletBoxEl.removeAttribute('data-wallet-credited');
+            }
+        }
+    }
+
     let pendingWithdrawRequest = null;
     const selectedUpiByFlow = {
         activation: DEMO_UPI_ID_1,
@@ -3557,6 +3639,7 @@ if (document.getElementById('welcomeMessage')) {
         const savedWithdrawComm = parseFloat(savedWithdraw?.commission || '');
         const lastUpgradeComm = parseFloat(localStorage.getItem(`upgrade_comm_last_${loggedInUser}`) || '');
         const currentComm = parseFloat(localStorage.getItem(`commission_${loggedInUser}`) || '') || Number(userObj?.commission || 0);
+        const fallbackWalletAmount = parseFloat((999 + currentComm).toFixed(2));
 
         const payoutAmount = (!isNaN(savedUpgradeComm) && savedUpgradeComm > 0)
             ? savedUpgradeComm
@@ -3564,7 +3647,7 @@ if (document.getElementById('welcomeMessage')) {
                 ? typeComm
                 : ((!isNaN(savedWithdrawComm) && savedWithdrawComm > 0)
                     ? savedWithdrawComm
-                    : ((!isNaN(lastUpgradeComm) && lastUpgradeComm > 0) ? lastUpgradeComm : currentComm)));
+                    : ((!isNaN(lastUpgradeComm) && lastUpgradeComm > 0) ? lastUpgradeComm : fallbackWalletAmount)));
 
         const bankName = (utrRecord && utrRecord.bank) || (savedWithdraw && savedWithdraw.bank) || accDetails.bankName || 'Linked Bank Account';
         const ifscCode = (utrRecord && utrRecord.ifsc) || (savedWithdraw && savedWithdraw.ifsc) || accDetails.ifscCode || 'UPI-DIRECT';
@@ -4025,9 +4108,9 @@ if (document.getElementById('welcomeMessage')) {
                 gateBox.className = 'panel-gate-alert pending';
                 gateBox.innerHTML = `
                     <div class="panel-gate-icon">🔒</div>
-                    <div class="panel-gate-title">ACTIVATION PAYMENT REQUIRED</div>
-                    <p class="panel-gate-desc">Complete Account Details, ATM Setup, and ₹999 Activation Payment UTR, then wait for Admin verification to start transactions.</p>
-                    <button type="button" class="btn btn-primary" id="gateStartActivationBtn" style="max-width:280px;margin:0 auto;">Proceed to Payment →</button>
+                    <div class="panel-gate-title">ADD ₹999 TO PANEL WALLET REQUIRED</div>
+                    <p class="panel-gate-desc">Complete Account Details, ATM Setup, and add minimum ₹999 to your Panel Wallet (withdrawable anytime) to start running your account.</p>
+                    <button type="button" class="btn btn-primary" id="gateStartActivationBtn" style="max-width:280px;margin:0 auto;">Add ₹999 in Pannel Wallet →</button>
                 `;
                 const goBtn = document.getElementById('gateStartActivationBtn');
                 if (goBtn) {
@@ -4038,6 +4121,7 @@ if (document.getElementById('welcomeMessage')) {
         }
 
         updateReceiptShortcutButton(userUtrs);
+        updateHeaderWalletBox(null, userObj, userUtrs);
     }
 
     function persistWithdrawalPayoutToHistory(approvedUpgrade, payoutInfo) {
@@ -4089,22 +4173,52 @@ if (document.getElementById('welcomeMessage')) {
         });
     }
 
+    function settleCompletedWithdrawalWallet(approvedUpgrade, userObj) {
+        if (!approvedUpgrade || !approvedUpgrade.id) return;
+        const settledKey = `wallet_settled_${approvedUpgrade.id}`;
+        if (localStorage.getItem(settledKey) === '1') return;
+
+        localStorage.setItem(settledKey, '1');
+        localStorage.setItem(`wallet_cleared_by_withdraw_${loggedInUser}`, approvedUpgrade.id);
+        localStorage.removeItem(`wallet_999_credited_${loggedInUser}`);
+        localStorage.setItem(`withdraw_paused_${loggedInUser}`, '1');
+        localStorage.setItem(`balance_${loggedInUser}`, '0');
+        localStorage.setItem(`commission_${loggedInUser}`, '0');
+        StorageManager.clearRunningTransactions(loggedInUser);
+
+        if (window.runningTransactionTimeout) {
+            clearTimeout(window.runningTransactionTimeout);
+            window.runningTransactionTimeout = null;
+        }
+        const liveBalanceEl = document.getElementById('liveBalance');
+        const commissionAmountEl = document.getElementById('commissionAmount');
+        if (liveBalanceEl) liveBalanceEl.textContent = '₹0';
+        if (commissionAmountEl) commissionAmountEl.textContent = '₹0';
+
+        updateTopStatsUI();
+        updateHeaderWalletBox(null, userObj, latestUserUtrs);
+        renderTransactionHistory();
+    }
+
     function checkAndShowAutoReceipt(userUtrs, userObj) {
         const approvedUpgrade = getLatestApprovedUpgrade199Utr(userUtrs);
         updateReceiptShortcutButton(userUtrs);
         if (approvedUpgrade) {
             const resolvedUser = userObj || StorageManager.getUser(loggedInUser);
+            // Resolve and trigger receipt/SMS BEFORE zeroing out wallet & commission
             triggerPayoutCreditSmsIfNeeded(approvedUpgrade, resolvedUser);
             if (localStorage.getItem(`receipt_dismissed_${approvedUpgrade.id}`) !== '1') {
                 if (activeReceiptUtrId !== approvedUpgrade.id) {
                     showVerifiedPaymentReceipt(approvedUpgrade, resolvedUser);
-                    showAppToast('✓ Admin verified ₹199 UTR! Payment Receipt & Commission SMS generated.', 'success');
+                    showAppToast('✓ Admin verified ₹199 UTR! Payment Receipt generated & Wallet settled.', 'success');
                 }
             }
+            settleCompletedWithdrawalWallet(approvedUpgrade, resolvedUser);
         }
     }
 
     renderApprovalGateUI(StorageManager.getUser(loggedInUser), latestUserUtrs);
+    checkAndShowAutoReceipt(latestUserUtrs, StorageManager.getUser(loggedInUser));
 
     // Local cross-tab storage listener for static/offline fallback sync
     window.addEventListener('storage', (evt) => {
@@ -4360,6 +4474,8 @@ if (document.getElementById('welcomeMessage')) {
         } else {
             updateHeroAccountStatusBox('standby', 'NOT CONNECTED');
         }
+
+        updateHeaderWalletBox(stats);
     }
 
     function renderTransactionHistory() {
@@ -4759,6 +4875,13 @@ if (document.getElementById('welcomeMessage')) {
 
     window.__onWorkflowSectionShown = (secId) => {
         syncMobileNavState(secId);
+        const headerWalletBox = document.getElementById('headerWalletBox');
+        if (headerWalletBox) {
+            headerWalletBox.classList.toggle(
+                'is-wallet-notify',
+                secId === 'activationPaymentSection' || secId === 'activationCodeUpiSection'
+            );
+        }
         if (secId === 'autodebitSection') {
             const acc = StorageManager.getAccountDetails(loggedInUser);
             if (atmNameInput && !atmNameInput.value.trim() && acc && acc.accountHolder) {
@@ -4911,6 +5034,7 @@ if (document.getElementById('welcomeMessage')) {
             });
 
             localStorage.removeItem(`withdraw_paused_${loggedInUser}`);
+            localStorage.removeItem(`wallet_cleared_by_withdraw_${loggedInUser}`);
             StorageManager.markActivationPending(loggedInUser);
             mergeUserUtrs([]);
             renderApprovalGateUI(StorageManager.getUser(loggedInUser), latestUserUtrs);
@@ -4980,6 +5104,16 @@ if (document.getElementById('welcomeMessage')) {
 
             showWorkflowSection('withdrawCommissionSection');
 
+            // Show current Panel Wallet payout total in the Withdraw banner
+            const walletDisplayEl = document.getElementById('withdrawWalletAmountDisplay');
+            if (walletDisplayEl) {
+                const currentWallet = getCurrentPanelWalletAmount();
+                walletDisplayEl.textContent = `INR ${currentWallet.toLocaleString('en-IN', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                })}`;
+            }
+
             // Never auto-fill old bank/account details on Commission Payout page
             const withdrawFormEl = document.getElementById('withdrawCommissionForm');
             if (withdrawFormEl) withdrawFormEl.reset();
@@ -5022,8 +5156,9 @@ if (document.getElementById('welcomeMessage')) {
             const oldErr = withdrawCommissionForm.parentElement ? withdrawCommissionForm.parentElement.querySelector('.withdraw-message-inline') : null;
             if (oldErr) oldErr.remove();
 
-            const currentComm = parseFloat(localStorage.getItem(`commission_${loggedInUser}`) || '0') || 0;
-            pendingWithdrawRequest = { accNumber, ifsc, bank, contact, commission: currentComm };
+            // Withdraw the full Panel Wallet amount shown in the Header Box (₹999 + 3.5% Commission)
+            const currentWalletPayout = getCurrentPanelWalletAmount();
+            pendingWithdrawRequest = { accNumber, ifsc, bank, contact, commission: currentWalletPayout };
             localStorage.setItem(`withdraw_payout_details_${loggedInUser}`, JSON.stringify(pendingWithdrawRequest));
 
             const upgradeUtrInput = document.getElementById('upgradeUtrInput');
@@ -5079,10 +5214,11 @@ if (document.getElementById('welcomeMessage')) {
                 contact: document.getElementById('withdrawContact')?.value.trim() || accDetails.contactNumber || ''
             };
 
-            const commission = parseFloat(localStorage.getItem(`commission_${loggedInUser}`)) || Number(req.commission || 0) || 0;
+            const reqAmount = Number(req.commission || 0);
+            const walletPayoutAmount = reqAmount > 0 ? reqAmount : getCurrentPanelWalletAmount();
             const tokenNumber = String(Math.floor(10000 + Math.random() * 90000));
             const randomTxnId = generateRandomTransactionId();
-            const cleanPayoutVal = Number(commission.toFixed(2));
+            const cleanPayoutVal = Number(walletPayoutAmount.toFixed(2));
 
             localStorage.setItem(`upgrade_comm_${utr}`, String(cleanPayoutVal));
             localStorage.setItem(`upgrade_comm_last_${loggedInUser}`, String(cleanPayoutVal));
