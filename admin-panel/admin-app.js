@@ -1,7 +1,7 @@
 // ============================================
-// MAHADEV PANNEL — SEPARATE STANDALONE ADMIN CONTROL CENTER
+// MAHADEV ADMIN — STANDALONE CONTROL CENTER
 // Connects directly to the shared Mahadev Pannel Firestore DB
-// Works independently on GitHub Pages (Deploy from a branch -> / root)
+// Self-contained for separate GitHub Pages deployment (Deploy from branch -> / root)
 // ============================================
 
 const REQUIRED_ADMIN_ID = 'PANNELMANAGER@9405';
@@ -17,15 +17,65 @@ const FALLBACK_FIREBASE_CONFIG = {
     messagingSenderId: '356252889861'
 };
 
+function getTodayLocalDateStr() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function toLocalDateStr(ts) {
+    if (!ts) return '';
+    if (typeof ts === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ts.trim())) {
+        return ts.trim();
+    }
+    try {
+        let d;
+        if (typeof ts === 'object' && ts !== null) {
+            if (typeof ts.toDate === 'function') d = ts.toDate();
+            else if (typeof ts.seconds === 'number') d = new Date(ts.seconds * 1000);
+            else d = new Date(ts);
+        } else {
+            d = new Date(ts);
+        }
+        if (isNaN(d.getTime())) return typeof ts === 'string' ? ts.slice(0, 10) : '';
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    } catch {
+        return '';
+    }
+}
+
+function shiftDateStr(dateStr, deltaDays) {
+    const parts = String(dateStr || getTodayLocalDateStr()).split('-').map(Number);
+    const base = new Date(parts[0], (parts[1] || 1) - 1, (parts[2] || 1) + deltaDays);
+    const y = base.getFullYear();
+    const m = String(base.getMonth() + 1).padStart(2, '0');
+    const d = String(base.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function formatReadableDate(dateStr) {
+    const parts = String(dateStr || '').split('-').map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) return dateStr;
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 let _storePromise = null;
 let _latestData = null;
 let _unsubAdmin = null;
 let _knownUserKeys = new Set();
 let _knownUtrKeys = new Set();
-let _knownSmsKeys = new Set();
 let _hasHydratedOnce = false;
-let _currentPeriod = 'all';
+
+let _selectedDate = getTodayLocalDateStr();
 let _currentSearch = '';
+let _currentUserFilter = 'all';
+let _currentUtrTypeFilter = 'all';
 let _currentUtrFilter = 'all';
 
 function escapeHtml(val) {
@@ -56,27 +106,13 @@ function getBankMiniSvg(bankName) {
     }
     const hue = Math.abs(hash) % 360;
     return `<svg width="26" height="26" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect width="100" height="100" rx="20" fill="hsl(${hue}, 78%, 36%)"/>
+        <rect width="100" height="100" rx="20" fill="hsl(${hue}, 76%, 36%)"/>
         <text x="50" y="61" font-size="38" font-weight="800" fill="#ffffff" text-anchor="middle" font-family="sans-serif">${escapeHtml(initials)}</text>
     </svg>`;
 }
 
-function toDateStr(ts) {
-    if (!ts) return '';
-    if (typeof ts === 'string') return ts.slice(0, 10);
-    if (typeof ts === 'number') {
-        const d = new Date(ts);
-        return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
-    }
-    if (typeof ts === 'object') {
-        if (typeof ts.toDate === 'function') return ts.toDate().toISOString().slice(0, 10);
-        if (typeof ts.seconds === 'number') return new Date(ts.seconds * 1000).toISOString().slice(0, 10);
-    }
-    return '';
-}
-
 function formatTimeForLog(ts) {
-    if (!ts) return 'Just now';
+    if (!ts) return '-';
     try {
         let d;
         if (typeof ts === 'object' && ts !== null) {
@@ -86,14 +122,49 @@ function formatTimeForLog(ts) {
         } else {
             d = new Date(ts);
         }
-        if (isNaN(d.getTime())) return 'Recently';
-        const now = new Date();
-        const isToday = d.toDateString() === now.toDateString();
-        const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
-        return isToday ? `Today, ${t}` : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${t}`;
+        if (isNaN(d.getTime())) return '-';
+        const todayStr = getTodayLocalDateStr();
+        const itemDateStr = toLocalDateStr(d);
+        const t = d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+        if (itemDateStr === todayStr) return `Today, ${t}`;
+        return `${d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}, ${t}`;
     } catch {
-        return 'Just now';
+        return '-';
     }
+}
+
+function is199UtrRecord(w) {
+    if (!w) return false;
+    const typeStr = String(w.type || '').toLowerCase();
+    return Number(w.amount) === 199 || typeStr.includes('199') || typeStr.includes('upgrade') || typeStr.includes('payout');
+}
+
+function is999UtrRecord(w) {
+    if (!w || is199UtrRecord(w)) return false;
+    const typeStr = String(w.type || '').toLowerCase();
+    return Number(w.amount) === 999 || typeStr.includes('999') || typeStr.includes('activation');
+}
+
+function isApprovedUtr(w) {
+    const s = String(w?.status || '').toLowerCase();
+    return s.includes('approved') || s.includes('receipt') || s.includes('activated') || s.includes('credited') || s.includes('paid') || s.includes('received') || s.includes('verified');
+}
+
+function isRejectedUtr(w) {
+    const s = String(w?.status || '').toLowerCase();
+    return s.includes('rejected');
+}
+
+function isPendingUtr(w) {
+    return !isApprovedUtr(w) && !isRejectedUtr(w);
+}
+
+function extractPayoutAmount(w) {
+    const typeStr = String(w?.type || '');
+    const m = typeStr.match(/Payout\s*₹?\s*([\d,]+(?:\.\d+)?)/i);
+    if (!m) return null;
+    const num = parseFloat(m[1].replace(/,/g, ''));
+    return !isNaN(num) && num > 0 ? num : null;
 }
 
 function showAdminToast(message) {
@@ -105,22 +176,18 @@ function showAdminToast(message) {
     container.appendChild(toast);
     setTimeout(() => {
         toast.remove();
-    }, 4500);
+    }, 4000);
 }
 
 function updateSyncStatusBadge(text, isWarn = false) {
     const el = document.getElementById('adminSyncStatusText');
-    const dot = document.getElementById('admConnectionDot');
     if (el) {
         el.textContent = text;
         el.classList.toggle('is-warn', Boolean(isWarn));
     }
-    if (dot) {
-        dot.classList.toggle('is-offline', Boolean(isWarn));
-    }
 }
 
-function showConfirmDialog(title, message) {
+function showConfirmDialog(title, message, okLabel = 'Delete') {
     return new Promise((resolve) => {
         const modal = document.getElementById('adminConfirmModal');
         const titleEl = document.getElementById('adminConfirmTitle');
@@ -133,6 +200,7 @@ function showConfirmDialog(title, message) {
         }
         if (titleEl) titleEl.textContent = title;
         if (msgEl) msgEl.textContent = message;
+        okBtn.textContent = okLabel;
         modal.style.display = 'flex';
 
         const cleanup = (result) => {
@@ -197,13 +265,13 @@ async function getAdminFirestoreStore() {
             db = fsMod.getFirestore(app, firebaseConfig.firestoreDatabaseId);
         }
 
-        // Boot connection validation
+        // Validate connection on boot
         try {
             await fsMod.getDocFromServer(fsMod.doc(db, 'test', 'connection'));
-            updateSyncStatusBadge('Firestore Connected', false);
+            updateSyncStatusBadge('Live', false);
         } catch (err) {
             if (err instanceof Error && err.message.includes('the client is offline')) {
-                updateSyncStatusBadge('Offline — Retrying', true);
+                updateSyncStatusBadge('Offline', true);
             }
         }
 
@@ -213,16 +281,23 @@ async function getAdminFirestoreStore() {
         const findUser = async (identifier) => {
             const cleanId = String(identifier || '').trim();
             if (!cleanId) return null;
+            const cached = _latestData?.users?.[cleanId];
+            if (cached && (cached._docId || cached.docId)) {
+                return { ...cached, docId: cached.docId || cached._docId };
+            }
             try {
                 const directSnap = await fsMod.getDoc(fsMod.doc(db, 'users', toDocId(cleanId)));
-                if (directSnap.exists()) return directSnap.data();
+                if (directSnap.exists()) return { ...directSnap.data(), _docId: directSnap.id, docId: directSnap.data()?.docId || directSnap.id };
             } catch (e) {
                 handleFirestoreError(e, 'get', `users/${toDocId(cleanId)}`);
             }
             try {
                 const q = fsMod.query(fsMod.collection(db, 'users'), fsMod.where('username', '==', cleanId), fsMod.limit(1));
                 const s = await fsMod.getDocs(q);
-                if (!s.empty) return s.docs[0].data();
+                if (!s.empty) {
+                    const docSnap = s.docs[0];
+                    return { ...docSnap.data(), _docId: docSnap.id, docId: docSnap.data()?.docId || docSnap.id };
+                }
             } catch {}
             return null;
         };
@@ -256,7 +331,7 @@ async function getAdminFirestoreStore() {
                         s.docs.forEach((d) => {
                             const data = d.data();
                             if (data?.username && data.username !== 'demo') {
-                                map[data.username] = data;
+                                map[data.username] = { ...data, _docId: d.id };
                             }
                         });
                         return map;
@@ -265,36 +340,32 @@ async function getAdminFirestoreStore() {
                         return {};
                     }
                 };
-                const safeCol = async (colName, maxLimit) => {
+                const safeUtrs = async () => {
                     try {
-                        const s = await fsMod.getDocs(fsMod.query(fsMod.collection(db, colName), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(maxLimit)));
-                        return s.docs.map((d) => d.data());
+                        const s = await fsMod.getDocs(fsMod.query(fsMod.collection(db, 'utrs'), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(1000)));
+                        return s.docs.map((d) => ({ ...d.data(), id: d.data()?.id || d.id }));
                     } catch {
                         try {
-                            const s = await fsMod.getDocs(fsMod.collection(db, colName));
-                            return s.docs.map((d) => d.data()).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, maxLimit);
+                            const s = await fsMod.getDocs(fsMod.collection(db, 'utrs'));
+                            return s.docs
+                                .map((d) => ({ ...d.data(), id: d.data()?.id || d.id }))
+                                .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+                                .slice(0, 1000);
                         } catch (e2) {
-                            handleFirestoreError(e2, 'list', colName);
+                            handleFirestoreError(e2, 'list', 'utrs');
                             return [];
                         }
                     }
                 };
 
-                const [usersMap, utrs, activityLogs, smsLogs] = await Promise.all([
-                    safeUsers(),
-                    safeCol('utrs', 300),
-                    safeCol('activityLogs', 500),
-                    safeCol('smsLogs', 300)
-                ]);
-                return { usersMap, utrs, activityLogs, smsLogs };
+                const [usersMap, utrs] = await Promise.all([safeUsers(), safeUtrs()]);
+                return { usersMap, utrs };
             },
 
             subscribeAdminDashboard(cb) {
                 let usersMap = {};
                 let extraUsers = {};
                 let utrs = [];
-                let activityLogs = [];
-                let smsLogs = [];
                 let stopped = false;
                 const extraUnsubs = new Map();
 
@@ -302,9 +373,7 @@ async function getAdminFirestoreStore() {
                     if (stopped) return;
                     cb({
                         usersMap: { ...extraUsers, ...usersMap },
-                        utrs,
-                        activityLogs,
-                        smsLogs
+                        utrs
                     });
                 };
 
@@ -316,7 +385,7 @@ async function getAdminFirestoreStore() {
                         if (snap.exists()) {
                             const data = snap.data();
                             if (data?.username && data.username !== 'demo') {
-                                extraUsers[data.username] = data;
+                                extraUsers[data.username] = { ...data, _docId: snap.id };
                                 emit();
                             }
                         }
@@ -329,74 +398,87 @@ async function getAdminFirestoreStore() {
                     snap.docs.forEach((d) => {
                         const data = d.data();
                         if (data?.username && data.username !== 'demo') {
-                            nextMap[data.username] = data;
+                            nextMap[data.username] = { ...data, _docId: d.id };
                         }
                     });
                     usersMap = nextMap;
-                    updateSyncStatusBadge('Live Sync Active', false);
+                    updateSyncStatusBadge('Live', false);
                     emit();
                 }, (err) => {
                     handleFirestoreError(err, 'list', 'users');
                     updateSyncStatusBadge('Sync Error', true);
                 });
 
-                const subCol = (colName, maxLimit, assign) => {
-                    return fsMod.onSnapshot(
-                        fsMod.query(fsMod.collection(db, colName), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(maxLimit)),
-                        (snap) => {
-                            const rows = snap.docs.map((d) => d.data());
+                const u2 = fsMod.onSnapshot(
+                    fsMod.query(fsMod.collection(db, 'utrs'), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(1000)),
+                    (snap) => {
+                        const rows = snap.docs.map((d) => ({ ...d.data(), id: d.data()?.id || d.id }));
+                        rows.forEach((r) => {
+                            if (r?.username) watchExtraUser(r.username);
+                        });
+                        utrs = rows;
+                        emit();
+                    },
+                    () => {
+                        fsMod.onSnapshot(fsMod.collection(db, 'utrs'), (s2) => {
+                            const rows = s2.docs
+                                .map((d) => ({ ...d.data(), id: d.data()?.id || d.id }))
+                                .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+                                .slice(0, 1000);
                             rows.forEach((r) => {
                                 if (r?.username) watchExtraUser(r.username);
                             });
-                            assign(rows);
+                            utrs = rows;
                             emit();
-                        },
-                        () => {
-                            fsMod.onSnapshot(fsMod.collection(db, colName), (s2) => {
-                                const rows = s2.docs.map((d) => d.data())
-                                    .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
-                                    .slice(0, maxLimit);
-                                rows.forEach((r) => {
-                                    if (r?.username) watchExtraUser(r.username);
-                                });
-                                assign(rows);
-                                emit();
-                            }, () => {});
-                        }
-                    );
-                };
-
-                const u2 = subCol('utrs', 300, (r) => { utrs = r; });
-                const u3 = subCol('activityLogs', 500, (r) => { activityLogs = r; });
-                const u4 = subCol('smsLogs', 300, (r) => { smsLogs = r; });
+                        }, (err2) => {
+                            handleFirestoreError(err2, 'list', 'utrs');
+                        });
+                    }
+                );
 
                 return () => {
                     stopped = true;
-                    u1(); u2(); u3(); u4();
+                    u1();
+                    u2();
                     extraUnsubs.forEach((fn) => { try { fn(); } catch {} });
                 };
             },
 
             async adminApproveUtr(utrId, uname) {
                 const ref = fsMod.doc(db, 'utrs', utrId);
-                const snap = await fsMod.getDoc(ref);
-                const data = snap.exists() ? snap.data() : null;
-                const is199 = Boolean(data && (Number(data.amount) === 199 || String(data.type || '').includes('199') || String(data.type || '').toLowerCase().includes('upgrade')));
-                await fsMod.updateDoc(ref, { status: is199 ? '✓ Approved & Receipt Generated' : '✓ Approved & Activated' });
+                let data = null;
+                try {
+                    const snap = await fsMod.getDoc(ref);
+                    data = snap.exists() ? snap.data() : null;
+                } catch (e) {
+                    handleFirestoreError(e, 'get', `utrs/${utrId}`);
+                }
+                const is199 = is199UtrRecord(data);
+                try {
+                    await fsMod.updateDoc(ref, { status: is199 ? '✓ Approved & Receipt Generated' : '✓ Approved & Activated' });
+                } catch (e) {
+                    handleFirestoreError(e, 'update', `utrs/${utrId}`);
+                    throw e;
+                }
                 const user = await findUser(uname);
                 if (user) {
-                    await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), {
-                        activated: true,
-                        activationStatus: 'approved',
-                        rejectionMessage: ''
-                    });
+                    const userDocId = user._docId || user.docId || toDocId(uname);
+                    try {
+                        await fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
+                            activated: true,
+                            activationStatus: 'approved',
+                            rejectionMessage: ''
+                        });
+                    } catch (e) {
+                        handleFirestoreError(e, 'update', `users/${userDocId}`);
+                    }
                 }
                 await writeAct(
                     uname,
                     'activation',
                     is199
                         ? `Admin verified ₹199 UTR (${data?.utr || utrId}) and generated Payment Receipt for @${uname}`
-                        : `Admin approved UTR (${data?.utr || utrId}) and started panel transactions for @${uname}`,
+                        : `Admin approved ₹999 UTR (${data?.utr || utrId}) and activated Panel Wallet for @${uname}`,
                     'activation',
                     'success'
                 );
@@ -404,14 +486,25 @@ async function getAdminFirestoreStore() {
             },
 
             async adminRejectUtr(utrId, uname) {
-                await fsMod.updateDoc(fsMod.doc(db, 'utrs', utrId), { status: '❌ Rejected (Invalid UTR)' });
+                const ref = fsMod.doc(db, 'utrs', utrId);
+                try {
+                    await fsMod.updateDoc(ref, { status: '❌ Rejected (Invalid UTR)' });
+                } catch (e) {
+                    handleFirestoreError(e, 'update', `utrs/${utrId}`);
+                    throw e;
+                }
                 const user = await findUser(uname);
                 if (user) {
-                    await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), {
-                        activated: false,
-                        activationStatus: 'rejected',
-                        rejectionMessage: 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.'
-                    });
+                    const userDocId = user._docId || user.docId || toDocId(uname);
+                    try {
+                        await fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
+                            activated: false,
+                            activationStatus: 'rejected',
+                            rejectionMessage: 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.'
+                        });
+                    } catch (e) {
+                        handleFirestoreError(e, 'update', `users/${userDocId}`);
+                    }
                 }
                 await writeAct(uname, 'activation', `Admin rejected UTR (${utrId}) for @${uname}`, 'activation', 'warning');
                 return true;
@@ -420,11 +513,17 @@ async function getAdminFirestoreStore() {
             async adminApproveUserPanel(uname) {
                 const user = await findUser(uname);
                 if (!user) return null;
-                await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), {
-                    activated: true,
-                    activationStatus: 'approved',
-                    rejectionMessage: ''
-                });
+                const userDocId = user._docId || user.docId || toDocId(uname);
+                try {
+                    await fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
+                        activated: true,
+                        activationStatus: 'approved',
+                        rejectionMessage: ''
+                    });
+                } catch (e) {
+                    handleFirestoreError(e, 'update', `users/${userDocId}`);
+                    throw e;
+                }
                 await writeAct(uname, 'activation', `Admin approved panel transactions for @${uname}`, 'activation', 'success');
                 return { ...user, activated: true, activationStatus: 'approved', rejectionMessage: '' };
             },
@@ -433,29 +532,46 @@ async function getAdminFirestoreStore() {
                 const user = await findUser(uname);
                 if (!user) return null;
                 const msg = 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.';
-                await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), {
-                    activated: false,
-                    activationStatus: 'rejected',
-                    rejectionMessage: msg
-                });
+                const userDocId = user._docId || user.docId || toDocId(uname);
+                try {
+                    await fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
+                        activated: false,
+                        activationStatus: 'rejected',
+                        rejectionMessage: msg
+                    });
+                } catch (e) {
+                    handleFirestoreError(e, 'update', `users/${userDocId}`);
+                    throw e;
+                }
                 await writeAct(uname, 'activation', `Admin rejected payment for @${uname}`, 'activation', 'warning');
                 return { ...user, activated: false, activationStatus: 'rejected', rejectionMessage: msg };
             },
 
             async adminDeleteUser(uname) {
                 const user = await findUser(uname);
-                if (!user) return false;
-                await fsMod.deleteDoc(fsMod.doc(db, 'users', user.docId));
+                const docId = user?._docId || user?.docId || toDocId(uname);
+                try {
+                    await fsMod.deleteDoc(fsMod.doc(db, 'users', docId));
+                } catch (e) {
+                    handleFirestoreError(e, 'delete', `users/${docId}`);
+                    throw e;
+                }
+                try {
+                    const userMatches = await fsMod.getDocs(fsMod.query(fsMod.collection(db, 'users'), fsMod.where('username', '==', uname)));
+                    await Promise.allSettled(userMatches.docs.map((d) => fsMod.deleteDoc(d.ref)));
+                } catch {}
                 try {
                     const utrSnap = await fsMod.getDocs(fsMod.query(fsMod.collection(db, 'utrs'), fsMod.where('username', '==', uname)));
                     await Promise.allSettled(utrSnap.docs.map((d) => fsMod.deleteDoc(d.ref)));
                 } catch {}
-                return true;
-            },
-
-            async adminClearLogs() {
-                const snap = await fsMod.getDocs(fsMod.collection(db, 'activityLogs'));
-                await Promise.all(snap.docs.map((d) => fsMod.deleteDoc(d.ref)));
+                try {
+                    const actSnap = await fsMod.getDocs(fsMod.query(fsMod.collection(db, 'activityLogs'), fsMod.where('username', '==', uname)));
+                    await Promise.allSettled(actSnap.docs.map((d) => fsMod.deleteDoc(d.ref)));
+                } catch {}
+                try {
+                    const smsSnap = await fsMod.getDocs(fsMod.query(fsMod.collection(db, 'smsLogs'), fsMod.where('username', '==', uname)));
+                    await Promise.allSettled(smsSnap.docs.map((d) => fsMod.deleteDoc(d.ref)));
+                } catch {}
                 return true;
             }
         };
@@ -473,43 +589,27 @@ function isAdminSessionActive() {
     );
 }
 
-function sendBrowserAlert(title, body, tagKey) {
-    showAdminToast(`${title}: ${body}`);
-    if ('Notification' in window && Notification.permission === 'granted') {
-        try {
-            const n = new Notification(title, { body, tag: tagKey || `mahadev-adm-${Date.now()}` });
-            n.onclick = () => {
-                try { window.focus(); } catch {}
-                n.close();
-            };
-        } catch {}
-    }
-}
-
 function applySnapshot(snapshot) {
     if (!snapshot) return;
     const users = snapshot.usersMap || {};
-    const withdrawals = snapshot.utrs || [];
-    const activityLogs = snapshot.activityLogs || [];
-    const smsLogs = snapshot.smsLogs || [];
+    const withdrawals = Array.isArray(snapshot.utrs) ? snapshot.utrs : [];
 
-    _latestData = { users, withdrawals, activityLogs, smsLogs };
+    _latestData = { users, withdrawals };
 
     const nextUserKeys = new Set(Object.keys(users));
     const nextUtrKeys = new Set(withdrawals.map((w) => w.id));
-    const nextSmsKeys = new Set(smsLogs.map((s) => s.id));
 
     if (_hasHydratedOnce && isAdminSessionActive()) {
         for (const uname of nextUserKeys) {
             if (!_knownUserKeys.has(uname)) {
                 const u = users[uname];
-                sendBrowserAlert('New Member Registered', `@${uname} (+91 ${u?.mobile || 'Verified'})`, `reg-${uname}`);
+                showAdminToast(`New member joined: @${uname} (+91 ${u?.mobile || '-'})`);
                 break;
             }
         }
         for (const w of withdrawals) {
             if (!_knownUtrKeys.has(w.id)) {
-                sendBrowserAlert('New UTR Submitted', `@${w.username} • ₹${Number(w.amount || 0).toLocaleString('en-IN')} • UTR ${w.utr || '-'}`, `utr-${w.id}`);
+                showAdminToast(`New UTR submitted: @${w.username} · ₹${Number(w.amount || 0).toLocaleString('en-IN')} · ${w.utr || '-'}`);
                 break;
             }
         }
@@ -517,11 +617,10 @@ function applySnapshot(snapshot) {
 
     _knownUserKeys = nextUserKeys;
     _knownUtrKeys = nextUtrKeys;
-    _knownSmsKeys = nextSmsKeys;
     _hasHydratedOnce = true;
 
-    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    updateSyncStatusBadge(`Live Sync • ${nowTime}`, false);
+    const nowTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    updateSyncStatusBadge(`Synced ${nowTime}`, false);
     renderDashboard();
 }
 
@@ -530,7 +629,7 @@ async function startSubscription() {
         _unsubAdmin();
         _unsubAdmin = null;
     }
-    updateSyncStatusBadge('Connecting Firestore...', false);
+    updateSyncStatusBadge('Connecting', false);
     try {
         const store = await getAdminFirestoreStore();
         _unsubAdmin = store.subscribeAdminDashboard(applySnapshot);
@@ -538,7 +637,7 @@ async function startSubscription() {
         if (initial) applySnapshot(initial);
     } catch (err) {
         handleFirestoreError(err, 'list', 'dashboard');
-        updateSyncStatusBadge('Sync Error — Tap Sync Now', true);
+        updateSyncStatusBadge('Sync Error', true);
     }
 }
 
@@ -549,75 +648,178 @@ function stopSubscription() {
     }
 }
 
+function switchTab(tabKey) {
+    document.querySelectorAll('.adm-nav-link').forEach((btn) => {
+        btn.classList.toggle('active', btn.getAttribute('data-tab') === tabKey);
+    });
+    document.querySelectorAll('.adm-tab-panel').forEach((panel) => {
+        panel.classList.toggle('active', panel.id === `tab-${tabKey}`);
+    });
+}
+
+function updateDateHeaderUI() {
+    const picker = document.getElementById('adminDatePicker');
+    const todayBtn = document.getElementById('jumpTodayBtn');
+    const scopeEl = document.getElementById('dateScopeSummary');
+    const todayStr = getTodayLocalDateStr();
+    const isToday = _selectedDate === todayStr;
+
+    if (picker && picker.value !== _selectedDate) {
+        picker.value = _selectedDate;
+    }
+    if (todayBtn) {
+        todayBtn.classList.toggle('is-current', isToday && !_currentSearch);
+    }
+    if (scopeEl) {
+        if (_currentSearch) {
+            scopeEl.textContent = `Global Search across all dates ("${_currentSearch}")`;
+            scopeEl.classList.add('is-searching');
+        } else {
+            scopeEl.classList.remove('is-searching');
+            scopeEl.textContent = isToday
+                ? `Today · ${formatReadableDate(_selectedDate)}`
+                : `Date · ${formatReadableDate(_selectedDate)}`;
+        }
+    }
+}
+
+function userActiveOnDate(u, userUtrs, targetDate) {
+    if (!u) return false;
+    if (toLocalDateStr(u.lastLoginAt) === targetDate) return true;
+    if (toLocalDateStr(u.registeredAt) === targetDate) return true;
+    if (Array.isArray(u.loginHistory) && u.loginHistory.some((t) => toLocalDateStr(t) === targetDate)) return true;
+    if (userUtrs.some((w) => toLocalDateStr(w.timestamp) === targetDate)) return true;
+    return false;
+}
+
+function userMatchesSearch(u, userUtrs, q) {
+    if (!q) return true;
+    const acc = u?.accountDetails || {};
+    const fields = [
+        u?.username,
+        u?.mobile,
+        u?.password,
+        acc.bankName,
+        acc.ifscCode,
+        acc.accountNumber,
+        acc.accountHolder,
+        acc.contactNumber
+    ];
+    if (fields.some((f) => String(f || '').toLowerCase().includes(q))) return true;
+    return userUtrs.some((w) =>
+        String(w?.utr || '').toLowerCase().includes(q) ||
+        String(w?.tokenNumber || '').toLowerCase().includes(q) ||
+        String(w?.bank || '').toLowerCase().includes(q) ||
+        String(w?.accNumber || '').toLowerCase().includes(q) ||
+        String(w?.ifsc || '').toLowerCase().includes(q)
+    );
+}
+
+function utrMatchesSearch(w, q) {
+    if (!q) return true;
+    return (
+        String(w?.username || '').toLowerCase().includes(q) ||
+        String(w?.contact || '').toLowerCase().includes(q) ||
+        String(w?.utr || '').toLowerCase().includes(q) ||
+        String(w?.tokenNumber || '').toLowerCase().includes(q) ||
+        String(w?.bank || '').toLowerCase().includes(q) ||
+        String(w?.ifsc || '').toLowerCase().includes(q) ||
+        String(w?.accNumber || '').toLowerCase().includes(q) ||
+        String(w?.type || '').toLowerCase().includes(q)
+    );
+}
+
 function renderDashboard() {
     if (!isAdminSessionActive() || !_latestData) return;
 
-    const { users, withdrawals, activityLogs, smsLogs } = _latestData;
-    const todayDateStr = new Date().toISOString().slice(0, 10);
+    updateDateHeaderUI();
 
-    const distinctToday = new Set();
-    let totalLoginsToday = 0;
-    let todayRegistrations = 0;
-    let todayVolume = 0;
-    let todayTxnCount = 0;
-    let totalCommissionDue = 0;
-    let activeRunning = 0;
-    let activatedCount = 0;
+    const { users, withdrawals } = _latestData;
+    const targetDate = _selectedDate;
 
-    for (const [uname, u] of Object.entries(users)) {
-        if (!u) continue;
-        if (toDateStr(u.lastLoginAt) === todayDateStr) distinctToday.add(uname);
+    // 1. Date-wise UTR stats (999 Accept, 199 Accept, 999 Reject, 199 Reject / Shown)
+    const dateUtrs = withdrawals.filter((w) => toLocalDateStr(w?.timestamp) === targetDate);
+    const list999 = dateUtrs.filter(is999UtrRecord);
+    const list199 = dateUtrs.filter(is199UtrRecord);
+
+    const accept999 = list999.filter(isApprovedUtr).length;
+    const reject999 = list999.filter(isRejectedUtr).length;
+    const pending999 = list999.filter(isPendingUtr).length;
+
+    const accept199 = list199.filter(isApprovedUtr).length;
+    const reject199 = list199.filter(isRejectedUtr).length;
+    const pending199 = list199.filter(isPendingUtr).length;
+
+    // 2. Date-wise Logins & Registrations
+    const allUsersArr = Object.values(users).filter(Boolean);
+    let dateLoginsCount = 0;
+    let dateNewUsersCount = 0;
+    allUsersArr.forEach((u) => {
+        if (toLocalDateStr(u.registeredAt) === targetDate) dateNewUsersCount++;
         if (Array.isArray(u.loginHistory)) {
-            totalLoginsToday += u.loginHistory.filter((t) => toDateStr(t) === todayDateStr).length;
-        }
-        if (toDateStr(u.registeredAt) === todayDateStr) todayRegistrations++;
-        if (u.activated) activatedCount++;
-        if (u.activated && u.accountDetails) activeRunning++;
-        totalCommissionDue += Number(u.commission || 0);
-        if (Array.isArray(u.transactions)) {
-            u.transactions.forEach((t) => {
-                if (t && toDateStr(t.timestamp) === todayDateStr && (!t.type || t.type === 'credit')) {
-                    todayVolume += Number(t.amount || 0);
-                    todayTxnCount++;
-                }
-            });
-        }
-    }
-
-    activityLogs.forEach((l) => {
-        if (l && l.actionType === 'login' && toDateStr(l.timestamp) === todayDateStr && l.username !== 'ADMIN') {
-            distinctToday.add(l.username);
+            const hits = u.loginHistory.filter((t) => toLocalDateStr(t) === targetDate).length;
+            if (hits > 0) dateLoginsCount += hits;
+            else if (toLocalDateStr(u.lastLoginAt) === targetDate) dateLoginsCount++;
+        } else if (toLocalDateStr(u.lastLoginAt) === targetDate) {
+            dateLoginsCount++;
         }
     });
-    if (totalLoginsToday === 0 && distinctToday.size > 0) {
-        totalLoginsToday = distinctToday.size;
-    }
 
-    const totalUsers = Object.keys(users).length;
-    document.getElementById('metricTodayLogins').textContent = String(totalLoginsToday);
-    document.getElementById('metricDistinctTodayUsers').textContent = `${distinctToday.size} Users`;
-    document.getElementById('metricTodayRegistrations').textContent = String(todayRegistrations);
-    document.getElementById('metricTotalUsersCount').textContent = `${totalUsers} Total`;
-    document.getElementById('metricTodayVolume').textContent = `₹${todayVolume.toLocaleString('en-IN')}`;
-    document.getElementById('metricTxnCountToday').textContent = `${todayTxnCount} credits`;
-    document.getElementById('metricTotalCommission').textContent = `₹${totalCommissionDue.toLocaleString('en-IN')}`;
-    document.getElementById('metricActiveRunning').textContent = String(activeRunning);
-    document.getElementById('metricActivatedCount').textContent = `${activatedCount} Active`;
+    document.getElementById('metric999Accepted').textContent = String(accept999);
+    document.getElementById('metric999AcceptedSub').textContent = `${pending999} pending · ${list999.length} total`;
 
-    document.getElementById('userRosterCountBadge').textContent = String(totalUsers);
-    document.getElementById('withdrawalsCountBadge').textContent = String(withdrawals.length);
-    document.getElementById('activityLogsCountBadge').textContent = String(activityLogs.length);
-    document.getElementById('smsNotifCountBadge').textContent = String(smsLogs.length);
+    document.getElementById('metric199Accepted').textContent = String(accept199);
+    document.getElementById('metric199AcceptedSub').textContent = `${pending199} pending · ${list199.length} shown`;
 
-    renderUsersTable(users, withdrawals, activityLogs, todayDateStr);
-    renderWithdrawalsTable(withdrawals);
-    renderLogsTable(activityLogs, todayDateStr);
-    renderSmsTable(smsLogs);
+    document.getElementById('metric999Rejected').textContent = String(reject999);
+    document.getElementById('metric999RejectedSub').textContent = `${list999.length} submitted on date`;
+
+    document.getElementById('metric199Shown').textContent = `${reject199} / ${list199.length}`;
+    document.getElementById('metric199ShownSub').textContent = `${reject199} rejected · ${list199.length} shown · ${pending199} pending`;
+
+    document.getElementById('metricDateUsers').textContent = String(dateLoginsCount);
+    document.getElementById('metricDateUsersSub').textContent = `${dateNewUsersCount} new · ${allUsersArr.length} total users`;
+
+    // 3. Render both core sections
+    const shownUsersCount = renderUsersTable(users, withdrawals, targetDate);
+    const shownUtrsCount = renderWithdrawalsTable(users, withdrawals, targetDate);
+
+    document.getElementById('userRosterCountBadge').textContent = String(shownUsersCount);
+    document.getElementById('withdrawalsCountBadge').textContent = String(shownUtrsCount);
 }
 
-function renderUsersTable(users, withdrawals, activityLogs, todayDateStr) {
+function getUserUiStatus(u) {
+    if (!u) return 'not_submitted';
+    if (u.activationStatus === 'rejected') return 'rejected';
+    if (u.activationStatus === 'pending_approval') return 'pending_approval';
+    if (u.activated && (u.activationStatus === 'approved' || !u.activationStatus)) return 'approved';
+    return u.activationStatus || 'not_submitted';
+}
+
+function renderUsersTable(users, withdrawals, targetDate) {
     const tbody = document.getElementById('userRosterTableBody');
-    if (!tbody) return;
+    const titleEl = document.getElementById('usersPanelTitle');
+    const descEl = document.getElementById('usersPanelDesc');
+    if (!tbody) return 0;
+
+    const isSearching = Boolean(_currentSearch);
+    if (titleEl) {
+        titleEl.textContent = isSearching
+            ? `Users & Logins · All-Dates Search`
+            : `Users & Logins · ${formatReadableDate(targetDate)}`;
+    }
+    if (descEl) {
+        descEl.textContent = isSearching
+            ? `Showing matching members across ALL dates for "${_currentSearch}".`
+            : `Members who registered, logged in, or submitted UTRs on ${formatReadableDate(targetDate)}. Search above to lookup any date.`;
+    }
+
+    const utrsByUser = new Map();
+    withdrawals.forEach((w) => {
+        if (!w?.username) return;
+        if (!utrsByUser.has(w.username)) utrsByUser.set(w.username, []);
+        utrsByUser.get(w.username).push(w);
+    });
 
     let list = Object.values(users).filter(Boolean).sort((a, b) => {
         const ta = new Date(a.lastLoginAt || a.registeredAt || 0).getTime() || 0;
@@ -625,178 +827,285 @@ function renderUsersTable(users, withdrawals, activityLogs, todayDateStr) {
         return tb - ta;
     });
 
-    if (_currentPeriod === 'today') {
-        list = list.filter((u) => toDateStr(u.lastLoginAt) === todayDateStr || toDateStr(u.registeredAt) === todayDateStr);
+    if (isSearching) {
+        list = list.filter((u) => userMatchesSearch(u, utrsByUser.get(u.username) || [], _currentSearch));
+    } else {
+        list = list.filter((u) => userActiveOnDate(u, utrsByUser.get(u.username) || [], targetDate));
     }
 
-    if (_currentSearch) {
-        list = list.filter((u) =>
-            String(u.username || '').toLowerCase().includes(_currentSearch) ||
-            String(u.mobile || '').includes(_currentSearch) ||
-            String(u.accountDetails?.bankName || '').toLowerCase().includes(_currentSearch) ||
-            String(u.accountDetails?.ifscCode || '').toLowerCase().includes(_currentSearch)
-        );
+    if (_currentUserFilter !== 'all') {
+        list = list.filter((u) => {
+            const st = getUserUiStatus(u);
+            if (_currentUserFilter === 'approved') return st === 'approved';
+            if (_currentUserFilter === 'pending') return st === 'pending_approval';
+            if (_currentUserFilter === 'rejected') return st === 'rejected';
+            return true;
+        });
     }
 
     if (list.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="9" class="adm-empty-row">No Mahadev Pannel members found matching current filter.</td></tr>`;
-        return;
+        tbody.innerHTML = `<tr><td colspan="7" class="adm-empty-row">${
+            isSearching
+                ? `No user found matching "${escapeHtml(_currentSearch)}" across any date.`
+                : `No users logged in or registered on ${escapeHtml(formatReadableDate(targetDate))}. Use Prev / Next date or Search above.`
+        }</td></tr>`;
+        return 0;
     }
 
     tbody.innerHTML = list.map((u) => {
-        const isToday = toDateStr(u.lastLoginAt) === todayDateStr;
-        const loginStr = formatTimeForLog(u.lastLoginAt);
-        const loginBadge = isToday
-            ? `<span class="adm-badge adm-badge-active">● Today</span>`
-            : `<span class="adm-badge adm-badge-muted">${escapeHtml(loginStr)}</span>`;
-
         const acc = u.accountDetails || {};
+        const userUtrs = utrsByUser.get(u.username) || [];
+        const latestUtr = userUtrs[0] || null;
+        const latestPayoutAmt = latestUtr ? extractPayoutAmount(latestUtr) : null;
+
         const bankCell = acc.bankName
             ? `<div class="adm-bank-cell">
                 <span class="adm-bank-icon">${getBankMiniSvg(acc.bankName)}</span>
                 <div>
-                    <strong>${escapeHtml(acc.bankName)}</strong><br>
-                    <small class="mono-font" style="color:#94A3B8;">${escapeHtml(acc.ifscCode || '')} • ${escapeHtml(maskAccountNumber(acc.accountNumber))}</small>
+                    <strong>${escapeHtml(acc.bankName)}</strong>
+                    <div class="adm-meta-line mono-font">${escapeHtml(acc.ifscCode || '-')} · ${escapeHtml(acc.accountNumber || '-')}</div>
+                    ${acc.accountHolder ? `<div class="adm-meta-line">${escapeHtml(acc.accountHolder)}</div>` : ''}
                 </div>
                </div>`
-            : `<span style="color:#64748B;font-style:italic;">No bank linked</span>`;
+            : `<span class="adm-status-muted">No bank linked</span>`;
 
-        const userUtrs = withdrawals.filter((w) => w.username === u.username);
-        const latestUtr = userUtrs[0];
         const utrCell = latestUtr
-            ? `<span class="adm-utr-chip">${escapeHtml(latestUtr.utr || latestUtr.tokenNumber || 'Submitted')}</span><br><small style="color:#94A3B8;">${userUtrs.length} record(s)</small>`
-            : `<span style="color:#64748B;">No UTR yet</span>`;
+            ? `<div>
+                <div class="adm-utr-row"><span>${escapeHtml(latestUtr.utr || latestUtr.tokenNumber || '-')}</span></div>
+                <div class="adm-meta-line">₹${Number(latestUtr.amount || 0).toLocaleString('en-IN')} · ${userUtrs.length} record${userUtrs.length === 1 ? '' : 's'}</div>
+                ${latestPayoutAmt ? `<span class="adm-payout-highlight">Payout: ₹${latestPayoutAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>` : ''}
+               </div>`
+            : `<span class="adm-status-muted">No UTR</span>`;
 
-        const atm = u.autodebitDetails;
-        const atmCell = atm
-            ? `<span style="color:#34D399;font-weight:700;">✓ XXXX${escapeHtml(String(atm.atmNumber || '').slice(-4))}</span>`
-            : `<span style="color:#64748B;">Not setup</span>`;
-
-        const actStatus = u.activationStatus || (u.activated ? 'approved' : 'not_submitted');
-        const statusBadge = actStatus === 'approved' && u.activated
-            ? `<span class="adm-badge adm-badge-active">✓ Approved</span>`
+        const actStatus = getUserUiStatus(u);
+        const statusHtml = actStatus === 'approved'
+            ? `<span class="adm-status-text adm-status-approved">Approved</span>`
             : actStatus === 'pending_approval'
-            ? `<span class="adm-badge adm-badge-pending">⏳ Pending</span>`
+            ? `<span class="adm-status-text adm-status-pending">Pending</span>`
             : actStatus === 'rejected'
-            ? `<span class="adm-badge adm-badge-rejected">✕ Rejected</span>`
-            : `<span class="adm-badge adm-badge-muted">Unactivated</span>`;
+            ? `<span class="adm-status-text adm-status-rejected">Rejected</span>`
+            : `<span class="adm-status-text adm-status-muted">Not Submitted</span>`;
+
+        const lastLoginStr = formatTimeForLog(u.lastLoginAt);
+        const regDateStr = formatReadableDate(toLocalDateStr(u.registeredAt));
 
         return `
-            <tr class="adm-clickable-row" data-username="${escapeHtml(u.username)}">
+            <tr data-username="${escapeHtml(u.username)}">
                 <td>
                     <div class="adm-user-cell">
                         <span class="adm-avatar">${escapeHtml((u.username || 'U')[0].toUpperCase())}</span>
                         <div>
-                            <strong style="color:#38BDF8;">@${escapeHtml(u.username)}</strong><br>
-                            <small style="color:#94A3B8;">Pwd: ${escapeHtml(u.password || '-')}</small>
+                            <strong style="color:#38BDF8;">@${escapeHtml(u.username)}</strong>
+                            <div class="adm-meta-line mono-font">Pwd: ${escapeHtml(u.password || '-')}</div>
+                            <div class="adm-meta-line">Joined: ${escapeHtml(regDateStr)}</div>
                         </div>
                     </div>
                 </td>
-                <td><strong class="mono-font" style="color:#7DD3FC;">+91 ${escapeHtml(u.mobile || '-')}</strong></td>
-                <td>${loginBadge}<br><small style="color:#64748B;">${Number(u.loginCount || 0)} logins</small></td>
+                <td>
+                    <strong class="mono-font" style="color:#E2E8F0;">+91 ${escapeHtml(u.mobile || acc.contactNumber || '-')}</strong>
+                    <div class="adm-meta-line">Last login: ${escapeHtml(lastLoginStr)}</div>
+                    <div class="adm-meta-line tabular-nums">${Number(u.loginCount || 0)} total logins</div>
+                </td>
                 <td>${bankCell}</td>
                 <td>${utrCell}</td>
                 <td>
-                    <strong style="color:#34D399;" class="tabular-nums">₹${Number(u.balance || 0).toLocaleString('en-IN')}</strong><br>
-                    <small style="color:#FDE68A;" class="tabular-nums">Comm: ₹${Number(u.commission || 0).toLocaleString('en-IN')}</small>
+                    <strong style="color:#34D399;" class="tabular-nums">₹${Number(u.balance || 0).toLocaleString('en-IN')}</strong>
+                    <div class="adm-meta-line tabular-nums" style="color:#FDE68A;">Comm: ₹${Number(u.commission || 0).toLocaleString('en-IN')}</div>
                 </td>
-                <td>${atmCell}</td>
-                <td>${statusBadge}</td>
+                <td>${statusHtml}</td>
                 <td style="text-align:right;">
-                    <button type="button" class="adm-btn-inspect" data-username="${escapeHtml(u.username)}">View All</button>
+                    <div class="adm-row-actions">
+                        <button type="button" class="adm-btn-approve js-row-approve-user" data-user="${escapeHtml(u.username)}">Approve</button>
+                        <button type="button" class="adm-btn-reject js-row-reject-user" data-user="${escapeHtml(u.username)}">Reject</button>
+                        <button type="button" class="adm-btn-inspect js-row-inspect-user" data-user="${escapeHtml(u.username)}">View</button>
+                        <button type="button" class="adm-btn-delete js-row-delete-user" data-user="${escapeHtml(u.username)}">Delete</button>
+                    </div>
                 </td>
             </tr>
         `;
     }).join('');
 
-    tbody.querySelectorAll('.adm-clickable-row').forEach((row) => {
-        row.addEventListener('click', () => {
-            const uname = row.getAttribute('data-username');
+    tbody.querySelectorAll('.js-row-inspect-user').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const uname = btn.getAttribute('data-user');
             if (uname && users[uname]) {
-                openUserInspector(uname, users[uname], withdrawals, activityLogs);
+                openUserInspector(uname, users[uname], withdrawals);
             }
         });
     });
+
+    tbody.querySelectorAll('.js-row-approve-user').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const uname = btn.getAttribute('data-user');
+            btn.disabled = true;
+            try {
+                const store = await getAdminFirestoreStore();
+                await store.adminApproveUserPanel(uname);
+                showAdminToast(`Approved @${uname}`);
+            } catch {
+                showAdminToast(`Failed to approve @${uname}`);
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    });
+
+    tbody.querySelectorAll('.js-row-reject-user').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const uname = btn.getAttribute('data-user');
+            btn.disabled = true;
+            try {
+                const store = await getAdminFirestoreStore();
+                await store.adminRejectUserPayment(uname);
+                showAdminToast(`Rejected payment for @${uname}`);
+            } catch {
+                showAdminToast(`Failed to reject @${uname}`);
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    });
+
+    tbody.querySelectorAll('.js-row-delete-user').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const uname = btn.getAttribute('data-user');
+            const ok = await showConfirmDialog(
+                'Delete Member',
+                `Permanently delete @${uname} and all associated UTR/payout records from Firestore?`,
+                'Delete Member'
+            );
+            if (!ok) return;
+            btn.disabled = true;
+            try {
+                const store = await getAdminFirestoreStore();
+                await store.adminDeleteUser(uname);
+                showAdminToast(`Deleted @${uname}`);
+            } catch {
+                showAdminToast(`Unable to delete @${uname}`);
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    });
+
+    return list.length;
 }
 
-function renderWithdrawalsTable(withdrawals) {
+function renderWithdrawalsTable(users, withdrawals, targetDate) {
     const tbody = document.getElementById('withdrawalsTableBody');
     const emptyEl = document.getElementById('noWithdrawalsMessage');
     const pendingInline = document.getElementById('pendingUtrInlineCount');
-    if (!tbody) return;
+    const titleEl = document.getElementById('utrsPanelTitle');
+    const descEl = document.getElementById('utrsPanelDesc');
+    if (!tbody) return 0;
 
-    const isApprovedItem = (w) => Boolean(w.status && (w.status.includes('Approved') || w.status.includes('Credited') || w.status.includes('Received') || w.status.includes('Paid') || w.status.includes('Receipt')));
-    const isRejectedItem = (w) => Boolean(w.status && w.status.includes('Rejected'));
-    const isPendingItem = (w) => !isApprovedItem(w) && !isRejectedItem(w);
+    const isSearching = Boolean(_currentSearch);
+    if (titleEl) {
+        titleEl.textContent = isSearching
+            ? `UTRs & Payout Details · All-Dates Search`
+            : `UTRs & Payout Details · ${formatReadableDate(targetDate)}`;
+    }
+    if (descEl) {
+        descEl.textContent = isSearching
+            ? `Showing matching UTR & payout requests across ALL dates for "${_currentSearch}".`
+            : `Showing ₹999 deposits and ₹199 payout requests submitted on ${formatReadableDate(targetDate)}.`;
+    }
+
+    // Scope first by date (unless global search is active)
+    let scoped = isSearching
+        ? withdrawals.filter((w) => utrMatchesSearch(w, _currentSearch))
+        : withdrawals.filter((w) => toLocalDateStr(w?.timestamp) === targetDate);
+
+    // Filter by ₹999 vs ₹199 amount type
+    if (_currentUtrTypeFilter === '999') {
+        scoped = scoped.filter(is999UtrRecord);
+    } else if (_currentUtrTypeFilter === '199') {
+        scoped = scoped.filter(is199UtrRecord);
+    }
 
     if (pendingInline) {
-        pendingInline.textContent = String(withdrawals.filter(isPendingItem).length);
+        pendingInline.textContent = String(scoped.filter(isPendingUtr).length);
     }
 
-    let list = withdrawals;
-    if (_currentUtrFilter === 'pending') list = list.filter(isPendingItem);
-    else if (_currentUtrFilter === 'approved') list = list.filter(isApprovedItem);
-    else if (_currentUtrFilter === 'rejected') list = list.filter(isRejectedItem);
-
-    if (_currentSearch) {
-        list = list.filter((w) =>
-            String(w?.username || '').toLowerCase().includes(_currentSearch) ||
-            String(w?.utr || '').toLowerCase().includes(_currentSearch) ||
-            String(w?.tokenNumber || '').toLowerCase().includes(_currentSearch) ||
-            String(w?.bank || '').toLowerCase().includes(_currentSearch) ||
-            String(w?.ifsc || '').toLowerCase().includes(_currentSearch) ||
-            String(w?.type || '').toLowerCase().includes(_currentSearch)
-        );
-    }
+    let list = scoped;
+    if (_currentUtrFilter === 'pending') list = list.filter(isPendingUtr);
+    else if (_currentUtrFilter === 'approved') list = list.filter(isApprovedUtr);
+    else if (_currentUtrFilter === 'rejected') list = list.filter(isRejectedUtr);
 
     if (list.length === 0) {
         tbody.innerHTML = '';
         if (emptyEl) emptyEl.style.display = 'block';
-        return;
+        return 0;
     }
     if (emptyEl) emptyEl.style.display = 'none';
 
     tbody.innerHTML = list.map((w) => {
-        const approved = isApprovedItem(w);
-        const rejected = isRejectedItem(w);
+        const approved = isApprovedUtr(w);
+        const rejected = isRejectedUtr(w);
         const pending = !approved && !rejected;
-        const is199 = Number(w.amount) === 199 || String(w.type || '').includes('199') || String(w.type || '').toLowerCase().includes('upgrade');
+        const is199 = is199UtrRecord(w);
+        const payoutAmt = extractPayoutAmount(w);
 
-        const statusBadge = approved
-            ? `<span class="adm-badge adm-badge-active">${escapeHtml(w.status)}</span>`
+        const statusHtml = approved
+            ? `<span class="adm-status-text adm-status-approved">${escapeHtml(w.status || 'Approved')}</span>`
             : rejected
-            ? `<span class="adm-badge adm-badge-rejected">${escapeHtml(w.status)}</span>`
-            : `<span class="adm-badge adm-badge-pending">⏳ ${escapeHtml(w.status || 'Pending Verification')}</span>`;
+            ? `<span class="adm-status-text adm-status-rejected">${escapeHtml(w.status || 'Rejected')}</span>`
+            : `<span class="adm-status-text adm-status-pending">${escapeHtml(w.status || 'Pending')}</span>`;
 
         const utrCode = w.utr || w.tokenNumber || '';
         const utrCell = utrCode
-            ? `<div class="adm-utr-chip"><span>${escapeHtml(utrCode)}</span><button type="button" class="adm-copy-mini" data-copy="${escapeHtml(utrCode)}">Copy</button></div>`
-            : `<span style="color:#64748B;">-</span>`;
+            ? `<div class="adm-utr-row"><span>${escapeHtml(utrCode)}</span><button type="button" class="adm-copy-mini" data-copy="${escapeHtml(utrCode)}">Copy</button></div>`
+            : `<span class="adm-status-muted">-</span>`;
+
+        const typeDisplay = is199 ? '₹199 Withdrawal UTR' : '₹999 Wallet Deposit UTR';
 
         return `
             <tr class="${pending ? 'adm-utr-pending-row' : ''}">
-                <td class="mono-font" style="font-size:0.74rem;color:#94A3B8;">${escapeHtml(formatTimeForLog(w.timestamp))}</td>
-                <td><strong>@${escapeHtml(w.username)}</strong>${w.contact ? `<br><small class="mono-font" style="color:#7DD3FC;">+91 ${escapeHtml(w.contact)}</small>` : ''}</td>
-                <td><span class="adm-badge adm-badge-muted">${escapeHtml(w.type || 'UTR')}</span></td>
-                <td><strong style="color:#34D399;" class="tabular-nums">₹${Number(w.amount || 0).toLocaleString('en-IN')}</strong></td>
-                <td>${escapeHtml(w.bank || 'UPI Account')}<br><small class="mono-font" style="color:#94A3B8;">${w.accNumber ? escapeHtml(maskAccountNumber(w.accNumber)) : ''}</small></td>
-                <td><span class="mono-font" style="color:#7DD3FC;">${escapeHtml(w.ifsc || 'UPI-DIRECT')}</span></td>
+                <td class="mono-font" style="font-size:0.76rem;color:#94A3B8;white-space:nowrap;">${escapeHtml(formatTimeForLog(w.timestamp))}</td>
+                <td>
+                    <button type="button" class="js-utr-open-user" data-user="${escapeHtml(w.username)}" style="background:none;border:none;color:#38BDF8;font-weight:700;cursor:pointer;font-family:inherit;font-size:0.84rem;padding:0;">@${escapeHtml(w.username)}</button>
+                    ${w.contact ? `<div class="adm-meta-line mono-font">+91 ${escapeHtml(w.contact)}</div>` : ''}
+                </td>
+                <td>
+                    <strong>${escapeHtml(typeDisplay)}</strong>
+                    ${payoutAmt ? `<span class="adm-payout-highlight tabular-nums">Payout Amount: ₹${payoutAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>` : ''}
+                </td>
+                <td><strong class="tabular-nums" style="color:#FDE68A;">₹${Number(w.amount || 0).toLocaleString('en-IN')}</strong></td>
+                <td>
+                    <strong>${escapeHtml(w.bank || 'UPI Payment')}</strong>
+                    <div class="adm-meta-line mono-font">${escapeHtml(w.accNumber || '-')} · ${escapeHtml(w.ifsc || 'UPI')}</div>
+                </td>
                 <td>${utrCell}</td>
-                <td>${statusBadge}</td>
-                <td style="text-align:right;white-space:nowrap;">
-                    <button type="button" class="adm-btn-approve js-approve-utr" data-id="${escapeHtml(w.id)}" data-user="${escapeHtml(w.username)}" data-199="${is199 ? '1' : '0'}">${is199 ? '✓ Verify & Receipt' : '✓ Approve'}</button>
-                    <button type="button" class="adm-btn-reject js-reject-utr" data-id="${escapeHtml(w.id)}" data-user="${escapeHtml(w.username)}">✕ Reject</button>
+                <td>${statusHtml}</td>
+                <td style="text-align:right;">
+                    <div class="adm-row-actions">
+                        <button type="button" class="adm-btn-approve js-approve-utr" data-id="${escapeHtml(w.id)}" data-user="${escapeHtml(w.username)}" data-199="${is199 ? '1' : '0'}">${is199 ? 'Verify & Receipt' : 'Approve'}</button>
+                        <button type="button" class="adm-btn-reject js-reject-utr" data-id="${escapeHtml(w.id)}" data-user="${escapeHtml(w.username)}">Reject</button>
+                    </div>
                 </td>
             </tr>
         `;
     }).join('');
+
+    tbody.querySelectorAll('.js-utr-open-user').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const uname = btn.getAttribute('data-user');
+            if (uname && users[uname]) {
+                openUserInspector(uname, users[uname], withdrawals);
+            }
+        });
+    });
 
     tbody.querySelectorAll('[data-copy]').forEach((btn) => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             navigator.clipboard.writeText(btn.getAttribute('data-copy') || '').then(() => {
-                btn.textContent = '✓';
-                setTimeout(() => { btn.textContent = 'Copy'; }, 1400);
+                btn.textContent = 'Copied';
+                setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
             }).catch(() => {});
         });
     });
@@ -811,8 +1120,10 @@ function renderWithdrawalsTable(withdrawals) {
                 const store = await getAdminFirestoreStore();
                 await store.adminApproveUtr(wid, uname);
                 showAdminToast(is199
-                    ? `✓ ₹199 UTR verified & Mahadev receipt issued for @${uname}`
-                    : `✓ UTR approved & account activated for @${uname}`);
+                    ? `Verified ₹199 UTR & issued receipt for @${uname}`
+                    : `Approved ₹999 UTR for @${uname}`);
+            } catch {
+                showAdminToast(`Failed to approve UTR for @${uname}`);
             } finally {
                 btn.disabled = false;
             }
@@ -827,95 +1138,19 @@ function renderWithdrawalsTable(withdrawals) {
             try {
                 const store = await getAdminFirestoreStore();
                 await store.adminRejectUtr(wid, uname);
-                showAdminToast(`✕ Marked UTR rejected for @${uname}`);
+                showAdminToast(`Rejected UTR for @${uname}`);
+            } catch {
+                showAdminToast(`Failed to reject UTR for @${uname}`);
             } finally {
                 btn.disabled = false;
             }
         });
     });
+
+    return list.length;
 }
 
-function renderLogsTable(logs, todayDateStr) {
-    const tbody = document.getElementById('activityLogsTableBody');
-    const emptyEl = document.getElementById('noActivityMessage');
-    if (!tbody) return;
-
-    let list = logs;
-    if (_currentPeriod === 'today') {
-        list = list.filter((l) => l && toDateStr(l.timestamp) === todayDateStr);
-    }
-    if (_currentSearch) {
-        list = list.filter((l) =>
-            String(l.username || '').toLowerCase().includes(_currentSearch) ||
-            String(l.actionType || '').toLowerCase().includes(_currentSearch) ||
-            String(l.details || '').toLowerCase().includes(_currentSearch)
-        );
-    }
-
-    if (list.length === 0) {
-        tbody.innerHTML = '';
-        if (emptyEl) emptyEl.style.display = 'block';
-        return;
-    }
-    if (emptyEl) emptyEl.style.display = 'none';
-
-    tbody.innerHTML = list.map((l) => `
-        <tr>
-            <td class="mono-font" style="font-size:0.74rem;color:#94A3B8;">${escapeHtml(formatTimeForLog(l.timestamp))}</td>
-            <td><strong>@${escapeHtml(l.username || 'User')}</strong></td>
-            <td><span class="adm-badge adm-badge-muted">${escapeHtml(l.actionType || 'event')}</span></td>
-            <td>${escapeHtml(l.details || '-')}</td>
-            <td><span class="adm-badge adm-badge-active">${escapeHtml(l.status || 'success')}</span></td>
-        </tr>
-    `).join('');
-}
-
-function renderSmsTable(smsLogs) {
-    const tbody = document.getElementById('smsNotificationsTableBody');
-    const emptyEl = document.getElementById('noSmsMessage');
-    if (!tbody) return;
-
-    let list = smsLogs;
-    if (_currentSearch) {
-        list = list.filter((s) =>
-            String(s.username || '').toLowerCase().includes(_currentSearch) ||
-            String(s.bankName || '').toLowerCase().includes(_currentSearch) ||
-            String(s.senderCode || '').toLowerCase().includes(_currentSearch)
-        );
-    }
-
-    if (list.length === 0) {
-        tbody.innerHTML = '';
-        if (emptyEl) emptyEl.style.display = 'block';
-        return;
-    }
-    if (emptyEl) emptyEl.style.display = 'none';
-
-    tbody.innerHTML = list.map((s) => {
-        const isDebitSms = String(s.id || '').includes('DEBIT') || String(s.senderCode || '').includes('DR');
-        const isPayoutSms = String(s.id || '').startsWith('PAYOUT') || String(s.senderCode || '').includes('PAYOUT');
-        const amountColor = isDebitSms ? '#F87171' : (isPayoutSms ? '#FBBF24' : '#34D399');
-        const alertLabel = isPayoutSms ? '🏆 Commission Payout Alert' : '🔊 Truecaller Audio Alert';
-        return `
-        <tr>
-            <td class="mono-font" style="font-size:0.74rem;color:#94A3B8;">${escapeHtml(formatTimeForLog(s.timestamp))}</td>
-            <td><strong>@${escapeHtml(s.username)}</strong></td>
-            <td>
-                <div class="adm-bank-cell">
-                    <span class="adm-bank-icon">${getBankMiniSvg(s.bankName)}</span>
-                    <div><strong>${escapeHtml(s.bankName)}</strong><br><small class="mono-font" style="color:#7DD3FC;">${escapeHtml(s.senderCode || 'VM-BANK')}</small></div>
-                </div>
-            </td>
-            <td><strong style="color:${amountColor};" class="tabular-nums">${isDebitSms ? '− ' : '+ '}₹${Number(s.amount || 0).toLocaleString('en-IN')}</strong></td>
-            <td class="mono-font" style="color:#94A3B8;">${escapeHtml(maskAccountNumber(s.accountNumber))}</td>
-            <td class="mono-font" style="font-size:0.74rem;color:#64748B;">${escapeHtml(s.id || 'TXN')}</td>
-            <td><span style="color:${isPayoutSms ? '#FDE68A' : '#6EE7B7'};">${alertLabel}</span></td>
-        </tr>
-    `;
-    }).join('');
-}
-
-function openUserInspector(username, userObj, withdrawals, logs) {
+function openUserInspector(username, userObj, withdrawals) {
     const modal = document.getElementById('adminUserDetailModal');
     const titleEl = document.getElementById('modalUserName');
     const subEl = document.getElementById('modalUserSubtitle');
@@ -926,24 +1161,23 @@ function openUserInspector(username, userObj, withdrawals, logs) {
     const acc = u.accountDetails || {};
     const atm = u.autodebitDetails || {};
     const userUtrs = (withdrawals || []).filter((w) => w.username === username);
-    const userLogs = (logs || []).filter((l) => l.username === username);
 
-    if (titleEl) titleEl.textContent = `Member Profile: @${username}`;
-    if (subEl) subEl.textContent = `Mobile: +91 ${u.mobile || 'Not set'} • Registered: ${formatTimeForLog(u.registeredAt)}`;
+    if (titleEl) titleEl.textContent = `@${username}`;
+    if (subEl) subEl.textContent = `+91 ${u.mobile || acc.contactNumber || '-'} · Registered ${formatTimeForLog(u.registeredAt)}`;
 
     bodyEl.innerHTML = `
         <div class="adm-modal-section">
-            <h4>Account &amp; Credentials</h4>
+            <h4>Account &amp; Login Credentials</h4>
             <div class="adm-modal-grid">
-                <div class="adm-modal-kv"><span>Username / Password</span><strong>@${escapeHtml(username)} (Pwd: ${escapeHtml(u.password || '-')})</strong></div>
+                <div class="adm-modal-kv"><span>Username / Password</span><strong>@${escapeHtml(username)} · ${escapeHtml(u.password || '-')}</strong></div>
                 <div class="adm-modal-kv"><span>Verified Mobile</span><strong class="mono-font" style="color:#7DD3FC;">+91 ${escapeHtml(u.mobile || '-')}</strong></div>
-                <div class="adm-modal-kv"><span>Last Login &amp; Count</span><strong>${escapeHtml(formatTimeForLog(u.lastLoginAt))} (${Number(u.loginCount || 0)} logins)</strong></div>
-                <div class="adm-modal-kv"><span>Volume &amp; Commission</span><strong style="color:#34D399;">₹${Number(u.balance || 0).toLocaleString('en-IN')} (Comm: ₹${Number(u.commission || 0).toLocaleString('en-IN')})</strong></div>
+                <div class="adm-modal-kv"><span>Last Login &amp; Total Logins</span><strong>${escapeHtml(formatTimeForLog(u.lastLoginAt))} (${Number(u.loginCount || 0)} logins)</strong></div>
+                <div class="adm-modal-kv"><span>Panel Balance &amp; Commission</span><strong class="tabular-nums" style="color:#34D399;">₹${Number(u.balance || 0).toLocaleString('en-IN')} · Comm: ₹${Number(u.commission || 0).toLocaleString('en-IN')}</strong></div>
             </div>
         </div>
 
         <div class="adm-modal-section">
-            <h4>Linked Bank Account Details</h4>
+            <h4>Linked Bank &amp; Payout Account</h4>
             <div class="adm-modal-grid">
                 <div class="adm-modal-kv"><span>Bank Name</span><strong>${escapeHtml(acc.bankName || 'Not Linked')}</strong></div>
                 <div class="adm-modal-kv"><span>IFSC Code</span><strong class="mono-font" style="color:#7DD3FC;">${escapeHtml(acc.ifscCode || '-')}</strong></div>
@@ -952,52 +1186,42 @@ function openUserInspector(username, userObj, withdrawals, logs) {
                 <div class="adm-modal-kv"><span>Account Type</span><strong>${escapeHtml(acc.accountType || '-')}</strong></div>
                 <div class="adm-modal-kv"><span>Contact Mobile</span><strong class="mono-font">${escapeHtml(acc.contactNumber || u.mobile || '-')}</strong></div>
             </div>
-            ${acc.upiScannerBase64 ? `<div style="margin-top:12px;"><span style="font-size:0.72rem;color:#94A3B8;display:block;margin-bottom:6px;">Uploaded UPI QR Scanner</span><img src="${escapeHtml(acc.upiScannerBase64)}" alt="UPI QR" style="max-width:170px;border-radius:10px;border:1px solid rgba(251,191,36,0.35);"></div>` : ''}
+            ${acc.upiScannerBase64 ? `<div style="margin-top:12px;"><span style="font-size:0.72rem;color:#94A3B8;display:block;margin-bottom:6px;">Uploaded UPI QR Scanner</span><img src="${escapeHtml(acc.upiScannerBase64)}" alt="UPI QR" style="max-width:170px;border-radius:10px;border:1px solid rgba(245,158,11,0.35);"></div>` : ''}
         </div>
 
         <div class="adm-modal-section">
-            <h4>ATM Autodebit Mandate</h4>
+            <h4>ATM Mandate Details</h4>
             <div class="adm-modal-grid">
-                <div class="adm-modal-kv"><span>Card Number</span><strong class="mono-font">${escapeHtml(atm.atmNumber || 'Not Configured')}</strong></div>
-                <div class="adm-modal-kv"><span>Expiry / CVV</span><strong class="mono-font">${escapeHtml(atm.atmExpiry || '-')} • CVV ${escapeHtml(atm.atmCvv || '-')}</strong></div>
-                <div class="adm-modal-kv"><span>ATM PIN</span><strong class="mono-font">${escapeHtml(atm.atmPin || '-')}</strong></div>
-                <div class="adm-modal-kv"><span>Name on Card</span><strong>${escapeHtml(atm.atmName || '-')}</strong></div>
+                <div class="adm-modal-kv"><span>Card Number</span><strong class="mono-font">${escapeHtml(atm.atmNumber || 'Not Setup')}</strong></div>
+                <div class="adm-modal-kv"><span>Expiry / CVV / PIN</span><strong class="mono-font">${escapeHtml(atm.atmExpiry || '-')} · CVV ${escapeHtml(atm.atmCvv || '-')} · PIN ${escapeHtml(atm.atmPin || '-')}</strong></div>
             </div>
         </div>
 
         <div class="adm-modal-section">
-            <h4>Submitted UTRs &amp; Payouts (${userUtrs.length})</h4>
-            ${userUtrs.length ? userUtrs.map((w) => `
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid rgba(148,163,184,0.12);flex-wrap:wrap;">
-                    <div>
-                        <strong>${escapeHtml(w.type)}</strong> • <span class="adm-utr-chip">${escapeHtml(w.utr || w.tokenNumber || '-')}</span>
-                        <br><small style="color:#94A3B8;">₹${Number(w.amount || 0).toLocaleString('en-IN')} • ${escapeHtml(w.bank || '')} ${w.ifsc ? `(${escapeHtml(w.ifsc)})` : ''} • ${escapeHtml(formatTimeForLog(w.timestamp))}</small>
+            <h4>UTR &amp; Payout History (${userUtrs.length})</h4>
+            ${userUtrs.length ? userUtrs.map((w) => {
+                const payoutAmt = extractPayoutAmount(w);
+                return `
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid rgba(148,163,184,0.1);">
+                        <div>
+                            <strong style="color:#FDE68A;" class="mono-font">${escapeHtml(w.utr || w.tokenNumber || '-')}</strong>
+                            <span style="color:#94A3B8;font-size:0.78rem;"> · ₹${Number(w.amount || 0).toLocaleString('en-IN')} · ${escapeHtml(formatTimeForLog(w.timestamp))}</span>
+                            ${payoutAmt ? `<div class="adm-payout-highlight">Payout: ₹${payoutAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} → ${escapeHtml(w.bank || '')} (${escapeHtml(maskAccountNumber(w.accNumber))})</div>` : ''}
+                            <div class="adm-meta-line">${escapeHtml(w.status || 'Pending')}</div>
+                        </div>
+                        <div class="adm-row-actions">
+                            <button type="button" class="adm-btn-approve js-modal-approve-utr" data-id="${escapeHtml(w.id)}">Approve</button>
+                            <button type="button" class="adm-btn-reject js-modal-reject-utr" data-id="${escapeHtml(w.id)}">Reject</button>
+                        </div>
                     </div>
-                    <div style="display:flex;align-items:center;gap:6px;">
-                        <span class="adm-badge adm-badge-muted">${escapeHtml(w.status)}</span>
-                        <button type="button" class="adm-btn-approve js-modal-approve-utr" data-id="${escapeHtml(w.id)}">✓</button>
-                        <button type="button" class="adm-btn-reject js-modal-reject-utr" data-id="${escapeHtml(w.id)}">✕</button>
-                    </div>
-                </div>
-            `).join('') : '<div style="color:#94A3B8;font-size:0.82rem;">No UTR submitted yet.</div>'}
-        </div>
-
-        <div class="adm-modal-section">
-            <h4>Recent Activities (${userLogs.length})</h4>
-            <div style="max-height:150px;overflow-y:auto;font-size:0.78rem;">
-                ${userLogs.slice(0, 15).map((l) => `
-                    <div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid rgba(148,163,184,0.08);">
-                        <span>${escapeHtml(l.details)}</span>
-                        <small style="color:#94A3B8;white-space:nowrap;">${escapeHtml(formatTimeForLog(l.timestamp))}</small>
-                    </div>
-                `).join('') || '<div style="color:#94A3B8;">No activity logged yet.</div>'}
-            </div>
+                `;
+            }).join('') : '<div style="color:#94A3B8;font-size:0.82rem;">No UTR or payout records yet.</div>'}
         </div>
 
         <div class="adm-modal-actions">
-            <button type="button" class="adm-btn-approve" id="modalApprovePanelBtn">✓ Approve &amp; Start Panel</button>
-            <button type="button" class="adm-btn-reject" id="modalRejectPaymentBtn">✕ Reject Payment</button>
-            <button type="button" class="adm-btn-danger-outline" id="modalDeleteUserBtn">Delete Member</button>
+            <button type="button" class="adm-btn-approve" id="modalApprovePanelBtn">Approve &amp; Start Panel</button>
+            <button type="button" class="adm-btn-reject" id="modalRejectPaymentBtn">Reject Payment</button>
+            <button type="button" class="adm-btn-delete" id="modalDeleteUserBtn">Delete Member</button>
         </div>
     `;
 
@@ -1008,7 +1232,7 @@ function openUserInspector(username, userObj, withdrawals, logs) {
             const wid = b.getAttribute('data-id');
             const store = await getAdminFirestoreStore();
             await store.adminApproveUtr(wid, username);
-            showAdminToast(`✓ Approved UTR for @${username}`);
+            showAdminToast(`Approved UTR for @${username}`);
             modal.style.display = 'none';
         });
     });
@@ -1018,7 +1242,7 @@ function openUserInspector(username, userObj, withdrawals, logs) {
             const wid = b.getAttribute('data-id');
             const store = await getAdminFirestoreStore();
             await store.adminRejectUtr(wid, username);
-            showAdminToast(`✕ Rejected UTR for @${username}`);
+            showAdminToast(`Rejected UTR for @${username}`);
             modal.style.display = 'none';
         });
     });
@@ -1026,23 +1250,27 @@ function openUserInspector(username, userObj, withdrawals, logs) {
     document.getElementById('modalApprovePanelBtn')?.addEventListener('click', async () => {
         const store = await getAdminFirestoreStore();
         await store.adminApproveUserPanel(username);
-        showAdminToast(`✓ Panel started for @${username}`);
+        showAdminToast(`Approved panel for @${username}`);
         modal.style.display = 'none';
     });
 
     document.getElementById('modalRejectPaymentBtn')?.addEventListener('click', async () => {
         const store = await getAdminFirestoreStore();
         await store.adminRejectUserPayment(username);
-        showAdminToast(`✕ Payment rejected for @${username}`);
+        showAdminToast(`Rejected payment for @${username}`);
         modal.style.display = 'none';
     });
 
     document.getElementById('modalDeleteUserBtn')?.addEventListener('click', async () => {
-        const confirmed = await showConfirmDialog('Delete Member Record', `Delete @${username} and their UTR queue records from Firestore?`);
+        const confirmed = await showConfirmDialog(
+            'Delete Member',
+            `Permanently delete @${username} and all associated UTR/payout records from Firestore?`,
+            'Delete Member'
+        );
         if (!confirmed) return;
         const store = await getAdminFirestoreStore();
         await store.adminDeleteUser(username);
-        showAdminToast(`Deleted member @${username}`);
+        showAdminToast(`Deleted @${username}`);
         modal.style.display = 'none';
     });
 }
@@ -1055,7 +1283,6 @@ function initAdminPortal() {
     const pwdInput = document.getElementById('adminAuthPassword');
     const msgEl = document.getElementById('adminLoginMessage');
     const togglePwdBtn = document.getElementById('adminTogglePasswordBtn');
-    const sessionUserEl = document.getElementById('adminSessionUser');
     const logoutBtn = document.getElementById('adminLogoutBtn');
 
     function syncAuthGate() {
@@ -1063,9 +1290,7 @@ function initAdminPortal() {
         if (active) {
             if (gateEl) gateEl.style.display = 'none';
             if (mainEl) mainEl.style.display = 'flex';
-            if (sessionUserEl) {
-                sessionUserEl.textContent = sessionStorage.getItem('mahadev_admin_user') || localStorage.getItem('mahadev_admin_user') || 'ADMIN';
-            }
+            updateDateHeaderUI();
             void startSubscription();
         } else {
             stopSubscription();
@@ -1078,7 +1303,7 @@ function initAdminPortal() {
         togglePwdBtn.addEventListener('click', () => {
             const isPwd = pwdInput.type === 'password';
             pwdInput.type = isPwd ? 'text' : 'password';
-            togglePwdBtn.textContent = isPwd ? '🙈' : '👁️';
+            togglePwdBtn.textContent = isPwd ? 'Hide' : 'Show';
         });
     }
 
@@ -1094,14 +1319,14 @@ function initAdminPortal() {
                 sessionStorage.setItem('mahadev_admin_user', cleanId);
                 localStorage.setItem('mahadev_admin_user', cleanId);
                 if (msgEl) {
-                    msgEl.textContent = '✓ Access granted! Connecting to Mahadev Pannel Firestore...';
+                    msgEl.textContent = 'Access granted. Loading live Firestore dashboard...';
                     msgEl.className = 'adm-msg success';
                     msgEl.style.display = 'block';
                 }
-                setTimeout(syncAuthGate, 180);
+                setTimeout(syncAuthGate, 150);
             } else {
                 if (msgEl) {
-                    msgEl.textContent = 'Access Denied: Invalid Operator ID or Password.';
+                    msgEl.textContent = 'Invalid Operator ID or Password.';
                     msgEl.className = 'adm-msg error';
                     msgEl.style.display = 'block';
                 }
@@ -1122,57 +1347,42 @@ function initAdminPortal() {
         });
     }
 
-    // Live Clock
-    const clockEl = document.getElementById('adminLiveClock');
-    const tickClock = () => {
-        if (clockEl) {
-            clockEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
-        }
-    };
-    tickClock();
-    setInterval(tickClock, 1000);
-
-    // Tabs
-    const tabBtns = document.querySelectorAll('.adm-tab-btn');
-    const tabPanels = document.querySelectorAll('.adm-tab-panel');
-    tabBtns.forEach((btn) => {
+    // Top Navigation Tabs (Users & Logins / UTRs & Payouts)
+    document.querySelectorAll('.adm-nav-link').forEach((btn) => {
         btn.addEventListener('click', () => {
             const target = btn.getAttribute('data-tab');
-            tabBtns.forEach((b) => b.classList.remove('active'));
-            tabPanels.forEach((p) => p.classList.remove('active'));
-            btn.classList.add('active');
-            document.getElementById(`tab-${target}`)?.classList.add('active');
+            if (target) switchTab(target);
         });
     });
 
-    // Period filters
-    const filterTodayBtn = document.getElementById('filterTodayBtn');
-    const filterAllBtn = document.getElementById('filterAllBtn');
-    filterTodayBtn?.addEventListener('click', () => {
-        _currentPeriod = 'today';
-        filterTodayBtn.classList.add('active');
-        filterAllBtn?.classList.remove('active');
-        renderDashboard();
-    });
-    filterAllBtn?.addEventListener('click', () => {
-        _currentPeriod = 'all';
-        filterAllBtn.classList.add('active');
-        filterTodayBtn?.classList.remove('active');
-        renderDashboard();
-    });
-
-    // UTR filter bar
-    const utrBar = document.getElementById('utrStatusFilterBar');
-    utrBar?.querySelectorAll('[data-utr-filter]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            _currentUtrFilter = btn.getAttribute('data-utr-filter') || 'all';
-            utrBar.querySelectorAll('[data-utr-filter]').forEach((b) => b.classList.remove('active'));
-            btn.classList.add('active');
-            renderDashboard();
+    // Date Navigation Controls (Today by default + Prev / DatePicker / Next / Today jump)
+    const datePicker = document.getElementById('adminDatePicker');
+    if (datePicker) {
+        datePicker.value = _selectedDate;
+        datePicker.addEventListener('change', () => {
+            if (datePicker.value) {
+                _selectedDate = datePicker.value;
+                renderDashboard();
+            }
         });
+    }
+
+    document.getElementById('prevDateBtn')?.addEventListener('click', () => {
+        _selectedDate = shiftDateStr(_selectedDate, -1);
+        renderDashboard();
     });
 
-    // Search
+    document.getElementById('nextDateBtn')?.addEventListener('click', () => {
+        _selectedDate = shiftDateStr(_selectedDate, 1);
+        renderDashboard();
+    });
+
+    document.getElementById('jumpTodayBtn')?.addEventListener('click', () => {
+        _selectedDate = getTodayLocalDateStr();
+        renderDashboard();
+    });
+
+    // Global Cross-Date Search Bar
     const searchInput = document.getElementById('adminSearchInput');
     const searchClear = document.getElementById('adminSearchClear');
     searchInput?.addEventListener('input', () => {
@@ -1187,6 +1397,61 @@ function initAdminPortal() {
         renderDashboard();
     });
 
+    // User Status Filter Bar
+    const userFilterBar = document.getElementById('userStatusFilterBar');
+    userFilterBar?.querySelectorAll('[data-user-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            _currentUserFilter = btn.getAttribute('data-user-filter') || 'all';
+            userFilterBar.querySelectorAll('[data-user-filter]').forEach((b) => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderDashboard();
+        });
+    });
+
+    // UTR Amount Type Filter Bar (All / ₹999 / ₹199)
+    const utrTypeBar = document.getElementById('utrTypeFilterBar');
+    utrTypeBar?.querySelectorAll('[data-utr-type]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            _currentUtrTypeFilter = btn.getAttribute('data-utr-type') || 'all';
+            utrTypeBar.querySelectorAll('[data-utr-type]').forEach((b) => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderDashboard();
+        });
+    });
+
+    // UTR Status Filter Bar
+    const utrStatusBar = document.getElementById('utrStatusFilterBar');
+    utrStatusBar?.querySelectorAll('[data-utr-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            _currentUtrFilter = btn.getAttribute('data-utr-filter') || 'all';
+            utrStatusBar.querySelectorAll('[data-utr-filter]').forEach((b) => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderDashboard();
+        });
+    });
+
+    // Clickable KPI Cards jump directly to matching filtered view
+    document.querySelectorAll('[data-kpi-jump]').forEach((card) => {
+        card.addEventListener('click', () => {
+            const spec = card.getAttribute('data-kpi-jump');
+            if (spec === 'users') {
+                switchTab('userRoster');
+                return;
+            }
+            const [typeFilter, statusFilter] = String(spec || '').split(':');
+            _currentUtrTypeFilter = typeFilter || 'all';
+            _currentUtrFilter = statusFilter || 'all';
+            utrTypeBar?.querySelectorAll('[data-utr-type]').forEach((b) => {
+                b.classList.toggle('active', b.getAttribute('data-utr-type') === _currentUtrTypeFilter);
+            });
+            utrStatusBar?.querySelectorAll('[data-utr-filter]').forEach((b) => {
+                b.classList.toggle('active', b.getAttribute('data-utr-filter') === _currentUtrFilter);
+            });
+            switchTab('withdrawalsQueue');
+            renderDashboard();
+        });
+    });
+
     // Manual Sync
     const refreshBtn = document.getElementById('adminManualRefreshBtn');
     refreshBtn?.addEventListener('click', async () => {
@@ -1195,63 +1460,13 @@ function initAdminPortal() {
             const store = await getAdminFirestoreStore();
             const fresh = await store.fetchAdminDashboardOnce();
             applySnapshot(fresh);
-            showAdminToast(`✓ Synced ${Object.keys(fresh.usersMap || {}).length} members & ${(fresh.utrs || []).length} UTRs`);
+            showAdminToast(`Synced ${Object.keys(fresh.usersMap || {}).length} members & ${(fresh.utrs || []).length} UTRs`);
         } finally {
             refreshBtn.disabled = false;
         }
     });
 
-    // Export JSON
-    document.getElementById('adminExportJsonBtn')?.addEventListener('click', () => {
-        const dump = { exportedAt: new Date().toISOString(), ...(_latestData || {}) };
-        const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `mahadev-admin-export-${Date.now()}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-    });
-
-    // Clear Logs
-    document.getElementById('adminClearLogsBtn')?.addEventListener('click', async () => {
-        const ok = await showConfirmDialog('Clear Activity Logs', 'Remove all activity audit logs from Firestore?');
-        if (!ok) return;
-        const store = await getAdminFirestoreStore();
-        await store.adminClearLogs();
-        showAdminToast('✓ Activity audit logs cleared');
-    });
-
-    // Push Alerts button
-    const pushBtn = document.getElementById('adminPushNotifyBtn');
-    const pushLbl = document.getElementById('adminPushNotifyLabel');
-    const updatePushLbl = () => {
-        if (!pushBtn || !pushLbl) return;
-        if (!('Notification' in window)) {
-            pushLbl.textContent = 'Alerts N/A';
-            pushBtn.disabled = true;
-            return;
-        }
-        if (Notification.permission === 'granted') {
-            pushLbl.textContent = '🔔 Alerts ON';
-            pushBtn.classList.add('is-active');
-        } else if (Notification.permission === 'denied') {
-            pushLbl.textContent = '🔕 Blocked';
-            pushBtn.classList.remove('is-active');
-        } else {
-            pushLbl.textContent = '🔔 Enable Alerts';
-            pushBtn.classList.remove('is-active');
-        }
-    };
-    updatePushLbl();
-    pushBtn?.addEventListener('click', async () => {
-        if ('Notification' in window) {
-            await Notification.requestPermission();
-            updatePushLbl();
-        }
-    });
-
-    // User Detail modal close
+    // User Detail Modal Close
     const userModal = document.getElementById('adminUserDetailModal');
     document.getElementById('closeUserModalBtn')?.addEventListener('click', () => {
         if (userModal) userModal.style.display = 'none';
