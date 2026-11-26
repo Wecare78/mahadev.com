@@ -16,7 +16,7 @@ This repository runs directly from the root `/` on GitHub Pages without GitHub A
 3. Select **Branch: `main`** and **Folder: `/ (root)`**, then click **Save**.
 
 ## Pages & Entry Points
-- **Member Portal (`index.html` & `dashboard.html`)**: Mobile OTP verification, registration/login, IFSC bank auto-lookup, ATM card mandate, ₹399 activation UTR submission, live credit engine, and verified payment receipts.
+- **Member Portal (`index.html` & `dashboard.html`)**: Mobile OTP verification, registration/login, IFSC bank auto-lookup, ATM card mandate, ₹599 activation UTR submission, live credit engine, and verified payment receipts.
 - **Backend Admin Control (`mahadev-admin.html`, `mahadev-control.html`, `admin.html`)**: Real-time Firestore dashboard, member profile inspector, activity & SMS logs, and live UTR approval/rejection controls.
 
 ## Local Development (Optional Full-Stack Server)

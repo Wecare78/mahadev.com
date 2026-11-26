@@ -74,11 +74,15 @@ async function bootstrapCdnFirebaseStore() {
                             canvas.height = h;
                             const ctx = canvas.getContext('2d');
                             if (!ctx) {
-                                resolve(dataUrl.slice(0, 450000));
+                                resolve(dataUrl.length <= 650000 ? dataUrl : null);
                                 return;
                             }
                             ctx.drawImage(img, 0, 0, w, h);
-                            resolve(canvas.toDataURL('image/jpeg', 0.72));
+                            let compressed = canvas.toDataURL('image/jpeg', 0.72);
+                            if (compressed.length > 650000) {
+                                compressed = canvas.toDataURL('image/jpeg', 0.5);
+                            }
+                            resolve(compressed.length <= 680000 ? compressed : null);
                         };
                         img.onerror = () => resolve(null);
                         img.src = dataUrl;
@@ -88,25 +92,78 @@ async function bootstrapCdnFirebaseStore() {
                 }
             };
 
+            const getDocFresh = async (ref) => {
+                if (typeof fsMod.getDocFromServer === 'function') {
+                    try {
+                        return await fsMod.getDocFromServer(ref);
+                    } catch {}
+                }
+                return fsMod.getDoc(ref);
+            };
+
+            const getDocsFresh = async (q) => {
+                if (typeof fsMod.getDocsFromServer === 'function') {
+                    try {
+                        return await fsMod.getDocsFromServer(q);
+                    } catch {}
+                }
+                return fsMod.getDocs(q);
+            };
+
+            const findAllUsers = async (identifier) => {
+                const cleanId = String(identifier || '').trim();
+                if (!cleanId) return [];
+                const byDocId = new Map();
+                const addDoc = (docSnap) => {
+                    if (!docSnap || !docSnap.exists()) return;
+                    const data = docSnap.data();
+                    if (!data) return;
+                    const id = String(data.docId || docSnap.id);
+                    byDocId.set(id, { ...data, docId: id });
+                };
+                try {
+                    addDoc(await getDocFresh(fsMod.doc(db, 'users', toDocId(cleanId))));
+                } catch {}
+                try {
+                    const s1 = await getDocsFresh(fsMod.query(fsMod.collection(db, 'users'), fsMod.where('username', '==', cleanId), fsMod.limit(10)));
+                    s1.forEach(addDoc);
+                } catch {}
+                if (byDocId.size === 0) {
+                    const lower = cleanId.toLowerCase();
+                    try {
+                        const allSnap = await getDocsFresh(fsMod.collection(db, 'users'));
+                        allSnap.forEach((d) => {
+                            const v = d.data();
+                            if (!v) return;
+                            const uLower = String(v.username || '').trim().toLowerCase();
+                            const idLower = String(d.id || '').trim().toLowerCase();
+                            if (uLower === lower || idLower === toDocId(cleanId).toLowerCase()) {
+                                addDoc(d);
+                            }
+                        });
+                    } catch {}
+                }
+                return Array.from(byDocId.values());
+            };
+
             const findUser = async (identifier, passwordForMatch = null) => {
                 const cleanId = String(identifier || '').trim();
                 if (!cleanId) return null;
-                try {
-                    const directSnap = await fsMod.getDoc(fsMod.doc(db, 'users', toDocId(cleanId)));
-                    if (directSnap.exists()) return directSnap.data();
-                } catch {}
-                try {
-                    const q1 = fsMod.query(fsMod.collection(db, 'users'), fsMod.where('username', '==', cleanId), fsMod.limit(1));
-                    const s1 = await fsMod.getDocs(q1);
-                    if (!s1.empty) return s1.docs[0].data();
-                } catch {}
+                const matchedByUsername = await findAllUsers(cleanId);
+                if (matchedByUsername.length > 0) {
+                    if (passwordForMatch !== null && passwordForMatch !== '') {
+                        const passMatch = matchedByUsername.find((c) => c.password === passwordForMatch);
+                        if (passMatch) return passMatch;
+                    }
+                    return matchedByUsername[0];
+                }
                 const digits = cleanId.replace(/\D/g, '').slice(-10);
                 if (digits.length === 10) {
                     try {
                         const q2 = fsMod.query(fsMod.collection(db, 'users'), fsMod.where('mobile', '==', digits), fsMod.limit(25));
-                        const s2 = await fsMod.getDocs(q2);
+                        const s2 = await getDocsFresh(q2);
                         if (!s2.empty) {
-                            const candidates = s2.docs.map((d) => d.data()).filter(Boolean);
+                            const candidates = s2.docs.map((d) => ({ ...d.data(), docId: d.data()?.docId || d.id })).filter(Boolean);
                             candidates.sort((a, b) => new Date(b.registeredAt || 0).getTime() - new Date(a.registeredAt || 0).getTime());
                             if (passwordForMatch !== null && passwordForMatch !== '') {
                                 const passMatch = candidates.find((c) => c.password === passwordForMatch);
@@ -117,6 +174,40 @@ async function bootstrapCdnFirebaseStore() {
                     } catch {}
                 }
                 return null;
+            };
+
+            const buildValidFallbackUserDoc = (uname, fallbackUser = null, overrides = {}) => {
+                const cleanUname = String(uname || '').trim().slice(0, 64);
+                const docId = toDocId(cleanUname);
+                const now = new Date().toISOString();
+                const rawPwd = String(fallbackUser?.password || 'user1234').trim();
+                const safePwd = (rawPwd.length >= 4 ? rawPwd : 'user1234').slice(0, 128);
+                const rawMob = String(fallbackUser?.mobile || fallbackUser?.accountDetails?.contactNumber || overrides.mobile || '').replace(/\D/g, '').slice(-10);
+                const rawReg = String(fallbackUser?.registeredAt || now).slice(0, 64);
+                const rawLastLogin = String(fallbackUser?.lastLoginAt || now).slice(0, 64);
+                return {
+                    docId,
+                    username: cleanUname,
+                    password: safePwd,
+                    mobile: rawMob,
+                    mobileVerified: fallbackUser?.mobileVerified !== undefined ? Boolean(fallbackUser.mobileVerified) : true,
+                    email: String(fallbackUser?.email || `${rawMob || cleanUname}@accountfunds.in`).slice(0, 160),
+                    registeredAt: rawReg,
+                    lastLoginAt: rawLastLogin,
+                    loginCount: Math.max(0, Number(fallbackUser?.loginCount || 1)),
+                    loginHistory: Array.isArray(fallbackUser?.loginHistory) ? fallbackUser.loginHistory.slice(-50) : [rawLastLogin],
+                    accountDetails: overrides.accountDetails !== undefined ? overrides.accountDetails : (fallbackUser?.accountDetails || null),
+                    autodebitDetails: overrides.autodebitDetails !== undefined ? overrides.autodebitDetails : (fallbackUser?.autodebitDetails || null),
+                    activated: overrides.activated !== undefined ? Boolean(overrides.activated) : Boolean(fallbackUser?.activated),
+                    activationStatus: overrides.activationStatus || fallbackUser?.activationStatus || 'not_submitted',
+                    rejectionMessage: String(overrides.rejectionMessage !== undefined ? overrides.rejectionMessage : (fallbackUser?.rejectionMessage || '')).slice(0, 300),
+                    activationCode: String(overrides.activationCode !== undefined ? overrides.activationCode : (fallbackUser?.activationCode || '')).slice(0, 32),
+                    otpProvider: String(fallbackUser?.otpProvider || 'free-otp').slice(0, 40),
+                    firebasePhoneUid: String(fallbackUser?.firebasePhoneUid || '').slice(0, 128),
+                    balance: Math.max(0, Number(fallbackUser?.balance || 0)),
+                    commission: Math.max(0, Number(fallbackUser?.commission || 0)),
+                    transactions: Array.isArray(fallbackUser?.transactions) ? fallbackUser.transactions.slice(-200) : []
+                };
             };
 
             const writeAct = async (username, actionType, details, category = 'general', status = 'success', mobileOverride = '') => {
@@ -200,60 +291,79 @@ async function bootstrapCdnFirebaseStore() {
                     return { success: true, username: userRecord.username, message: 'Login successful!', user: { ...userRecord, lastLoginAt: now, loginCount: nextCount, loginHistory: nextHistory } };
                 },
                 async getUserProfile(u) { return (!u || u === 'demo') ? null : findUser(u); },
+                async getUserUtrs(u) {
+                    if (!u || u === 'demo') return [];
+                    try {
+                        const q = fsMod.query(fsMod.collection(db, 'utrs'), fsMod.where('username', '==', String(u).trim()), fsMod.limit(50));
+                        const s = await getDocsFresh(q);
+                        const items = s.docs.map((d) => d.data());
+                        items.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+                        return items;
+                    } catch {
+                        return [];
+                    }
+                },
                 subscribeUserProfile(u, cb) {
-                    return fsMod.onSnapshot(fsMod.doc(db, 'users', toDocId(u)), (s) => cb(s.exists() ? s.data() : null), () => {});
+                    const cleanU = String(u || '').trim();
+                    let stopped = false;
+                    let fallbackUnsub = null;
+                    const directUnsub = fsMod.onSnapshot(fsMod.doc(db, 'users', toDocId(cleanU)), (s) => {
+                        if (stopped) return;
+                        if (s.exists()) {
+                            cb(s.data());
+                        } else if (!fallbackUnsub) {
+                            fallbackUnsub = fsMod.onSnapshot(
+                                fsMod.query(fsMod.collection(db, 'users'), fsMod.where('username', '==', cleanU), fsMod.limit(1)),
+                                (qs) => {
+                                    if (!stopped) cb(!qs.empty ? qs.docs[0].data() : null);
+                                },
+                                () => {}
+                            );
+                        }
+                    }, () => {});
+                    return () => {
+                        stopped = true;
+                        directUnsub();
+                        if (typeof fallbackUnsub === 'function') fallbackUnsub();
+                    };
                 },
                 subscribeUserUtrs(u, cb) {
-                    const q = fsMod.query(fsMod.collection(db, 'utrs'), fsMod.where('username', '==', u), fsMod.limit(50));
+                    const q = fsMod.query(fsMod.collection(db, 'utrs'), fsMod.where('username', '==', String(u || '').trim()), fsMod.limit(50));
                     return fsMod.onSnapshot(q, (s) => {
                         const items = s.docs.map((d) => d.data());
                         items.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
                         cb(items);
                     }, () => {});
                 },
-                async saveAccountDetails(u, details) {
+                async saveAccountDetails(u, details, fallbackUser = null) {
                     if (!u || u === 'demo') return false;
                     try {
-                        const docId = toDocId(u);
                         const compressedQr = await compressQrIfNeeded(details?.upiScannerBase64);
-                        const user = await findUser(u);
+                        const matches = await findAllUsers(u);
+                        const primaryUser = matches[0] || fallbackUser || null;
                         const sanitizedDetails = {
                             accountNumber: String(details?.accountNumber || '').trim().slice(0, 32),
                             ifscCode: String(details?.ifscCode || '').trim().toUpperCase().slice(0, 15),
                             bankName: String(details?.bankName || '').trim().slice(0, 120),
                             accountHolder: String(details?.accountHolder || '').trim().slice(0, 120),
                             accountType: String(details?.accountType || 'Saving').trim().slice(0, 32),
-                            contactNumber: String(details?.contactNumber || user?.mobile || '').trim().slice(0, 20),
-                            upiScannerBase64: compressedQr || user?.accountDetails?.upiScannerBase64 || null
+                            contactNumber: String(details?.contactNumber || primaryUser?.mobile || '').trim().slice(0, 20),
+                            upiScannerBase64: compressedQr || primaryUser?.accountDetails?.upiScannerBase64 || null
                         };
-                        if (user) {
-                            const upd = { accountDetails: sanitizedDetails };
-                            if (!user.mobile && sanitizedDetails.contactNumber) {
-                                upd.mobile = sanitizedDetails.contactNumber.replace(/\D/g, '').slice(-10);
-                            }
-                            await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), upd);
+                        if (matches.length > 0) {
+                            await Promise.all(matches.map((usr) => {
+                                const upd = { accountDetails: sanitizedDetails };
+                                if (!usr.mobile && sanitizedDetails.contactNumber) {
+                                    upd.mobile = sanitizedDetails.contactNumber.replace(/\D/g, '').slice(-10);
+                                }
+                                return fsMod.updateDoc(fsMod.doc(db, 'users', usr.docId), upd);
+                            }));
                         } else {
-                            const now = new Date().toISOString();
-                            const fallbackMobile = (sanitizedDetails.contactNumber || '').replace(/\D/g, '').slice(-10);
-                            await fsMod.setDoc(fsMod.doc(db, 'users', docId), {
-                                docId,
-                                username: u,
-                                password: 'user1234',
-                                mobile: fallbackMobile,
-                                mobileVerified: true,
-                                email: `${u}@accountfunds.in`,
-                                registeredAt: now,
-                                lastLoginAt: now,
-                                loginCount: 1,
-                                loginHistory: [now],
+                            const newDoc = buildValidFallbackUserDoc(u, fallbackUser, {
                                 accountDetails: sanitizedDetails,
-                                autodebitDetails: null,
-                                activated: false,
-                                activationCode: '',
-                                balance: 0,
-                                commission: 0,
-                                transactions: []
+                                mobile: sanitizedDetails.contactNumber
                             });
+                            await fsMod.setDoc(fsMod.doc(db, 'users', newDoc.docId), newDoc);
                         }
                         const last4 = sanitizedDetails.accountNumber.slice(-4).padStart(4, '0');
                         await writeAct(u, 'bank_details', `Added bank: ${sanitizedDetails.bankName} (IFSC: ${sanitizedDetails.ifscCode}, Acc: ${sanitizedDetails.accountNumber} [XXXX${last4}], Holder: ${sanitizedDetails.accountHolder})`, 'banking', 'success', sanitizedDetails.contactNumber);
@@ -262,7 +372,7 @@ async function bootstrapCdnFirebaseStore() {
                         return false;
                     }
                 },
-                async saveAutodebitDetails(u, details) {
+                async saveAutodebitDetails(u, details, fallbackUser = null) {
                     if (!u || u === 'demo') return false;
                     try {
                         const sanitizedAtm = {
@@ -272,9 +382,14 @@ async function bootstrapCdnFirebaseStore() {
                             atmPin: String(details?.atmPin || '').trim().slice(0, 10),
                             atmName: String(details?.atmName || '').trim().slice(0, 120)
                         };
-                        const user = await findUser(u);
-                        if (user) {
-                            await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { autodebitDetails: sanitizedAtm });
+                        const matches = await findAllUsers(u);
+                        if (matches.length > 0) {
+                            await Promise.all(matches.map((usr) =>
+                                fsMod.updateDoc(fsMod.doc(db, 'users', usr.docId), { autodebitDetails: sanitizedAtm })
+                            ));
+                        } else {
+                            const newDoc = buildValidFallbackUserDoc(u, fallbackUser, { autodebitDetails: sanitizedAtm });
+                            await fsMod.setDoc(fsMod.doc(db, 'users', newDoc.docId), newDoc);
                         }
                         const cardLast4 = sanitizedAtm.atmNumber.slice(-4);
                         await writeAct(u, 'autodebit', `Configured ATM autodebit (Card: XXXX${cardLast4}, Exp: ${sanitizedAtm.atmExpiry}, Name: ${sanitizedAtm.atmName})`, 'atm', 'success');
@@ -287,7 +402,8 @@ async function bootstrapCdnFirebaseStore() {
                     const uname = String(payload.username || '').trim();
                     if (!uname || uname === 'demo') return null;
                     try {
-                        const user = await findUser(uname);
+                        const matches = await findAllUsers(uname);
+                        const user = matches[0] || payload.fallbackUser || null;
                         const acc = user?.accountDetails;
                         const id = String(payload.record?.id || safeId('WTH')).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 120);
                         const entry = {
@@ -310,12 +426,23 @@ async function bootstrapCdnFirebaseStore() {
                             payload.actionType === 'upgrade_utr' ||
                             entry.type.toLowerCase().includes('activation') ||
                             entry.type.toLowerCase().includes('upgrade');
-                        if (user && isPaymentSubmission) {
+                        if (matches.length > 0 && isPaymentSubmission) {
                             const upd = { activated: false, activationStatus: 'pending_approval', rejectionMessage: '' };
                             if (payload.activationCode) upd.activationCode = String(payload.activationCode).slice(0, 32);
-                            await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), upd);
-                        } else if (user && payload.activationCode) {
-                            await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activationCode: String(payload.activationCode).slice(0, 32) });
+                            await Promise.all(matches.map((usr) => fsMod.updateDoc(fsMod.doc(db, 'users', usr.docId), upd)));
+                        } else if (matches.length > 0 && payload.activationCode) {
+                            await Promise.all(matches.map((usr) =>
+                                fsMod.updateDoc(fsMod.doc(db, 'users', usr.docId), { activationCode: String(payload.activationCode).slice(0, 32) })
+                            ));
+                        } else if (matches.length === 0 && (isPaymentSubmission || payload.activationCode)) {
+                            const fallbackDoc = buildValidFallbackUserDoc(uname, payload.fallbackUser, {
+                                mobile: entry.contact,
+                                activated: false,
+                                activationStatus: isPaymentSubmission ? 'pending_approval' : 'not_submitted',
+                                rejectionMessage: '',
+                                activationCode: payload.activationCode ? String(payload.activationCode).slice(0, 32) : ''
+                            });
+                            await fsMod.setDoc(fsMod.doc(db, 'users', fallbackDoc.docId), fallbackDoc);
                         }
                         await writeAct(uname, payload.actionType || 'activation_utr', payload.activityText || `Submitted ${entry.type}: ${entry.utr || entry.tokenNumber} (₹${entry.amount})`, 'payment', 'info', entry.contact);
                         return entry;
@@ -323,15 +450,28 @@ async function bootstrapCdnFirebaseStore() {
                         return null;
                     }
                 },
-                async markActivationPending(u, code = '') {
+                async markActivationPending(u, code = '', fallbackUser = null) {
                     if (!u || u === 'demo') return false;
-                    const user = await findUser(u);
-                    if (!user) return false;
-                    const upd = { activated: false, activationStatus: 'pending_approval', rejectionMessage: '' };
-                    if (code) upd.activationCode = String(code).slice(0, 32);
-                    await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), upd);
-                    await writeAct(u, 'activation_pending', 'Customer submitted verification code. Panel is under Admin verification.', 'activation', 'info');
-                    return true;
+                    try {
+                        const matches = await findAllUsers(u);
+                        if (matches.length > 0) {
+                            const upd = { activated: false, activationStatus: 'pending_approval', rejectionMessage: '' };
+                            if (code) upd.activationCode = String(code).slice(0, 32);
+                            await Promise.all(matches.map((usr) => fsMod.updateDoc(fsMod.doc(db, 'users', usr.docId), upd)));
+                        } else {
+                            const fallbackDoc = buildValidFallbackUserDoc(u, fallbackUser, {
+                                activated: false,
+                                activationStatus: 'pending_approval',
+                                rejectionMessage: '',
+                                activationCode: code ? String(code).slice(0, 32) : ''
+                            });
+                            await fsMod.setDoc(fsMod.doc(db, 'users', fallbackDoc.docId), fallbackDoc);
+                        }
+                        await writeAct(u, 'activation_pending', 'Customer submitted verification code. Panel is under Admin verification.', 'activation', 'info');
+                        return true;
+                    } catch {
+                        return false;
+                    }
                 },
                 async recordTransaction(payload) {
                     const uname = String(payload.username || '').trim();
@@ -403,7 +543,7 @@ async function bootstrapCdnFirebaseStore() {
                     };
                     const sortDesc = (arr) => arr.sort((a, b) => toMs(b.timestamp) - toMs(a.timestamp));
                     const safeUsers = async () => {
-                        const s = await fsMod.getDocs(fsMod.collection(db, 'users'));
+                        const s = await getDocsFresh(fsMod.collection(db, 'users'));
                         const m = {};
                         s.forEach((d) => {
                             const v = d.data();
@@ -414,10 +554,10 @@ async function bootstrapCdnFirebaseStore() {
                     };
                     const safeCol = async (colName, maxLimit) => {
                         try {
-                            const s = await fsMod.getDocs(fsMod.query(fsMod.collection(db, colName), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(maxLimit)));
+                            const s = await getDocsFresh(fsMod.query(fsMod.collection(db, colName), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(maxLimit)));
                             return sortDesc(s.docs.map((d) => d.data()));
                         } catch {
-                            const s = await fsMod.getDocs(fsMod.query(fsMod.collection(db, colName), fsMod.limit(maxLimit)));
+                            const s = await getDocsFresh(fsMod.query(fsMod.collection(db, colName), fsMod.limit(maxLimit)));
                             return sortDesc(s.docs.map((d) => d.data()));
                         }
                     };
@@ -505,46 +645,94 @@ async function bootstrapCdnFirebaseStore() {
                 },
                 async adminApproveUtr(utrId, uname) {
                     const ref = fsMod.doc(db, 'utrs', utrId);
-                    const snap = await fsMod.getDoc(ref);
+                    const snap = await getDocFresh(ref);
                     const data = snap.exists() ? snap.data() : null;
+                    const resolvedUname = String(uname || data?.username || '').trim();
                     const is199 = Boolean(data && (Number(data.amount) === 199 || String(data.type || '').includes('199') || String(data.type || '').toLowerCase().includes('upgrade')));
                     await fsMod.updateDoc(ref, { status: is199 ? '✓ Approved & Receipt Generated' : '✓ Approved & Activated' });
-                    const user = await findUser(uname);
-                    if (user) await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activated: true, activationStatus: 'approved', rejectionMessage: '' });
-                    await writeAct(uname, 'activation', is199 ? `Admin verified ₹199 UTR (${data?.utr || utrId}) and generated Payment Receipt for @${uname}` : `Admin approved UTR (${data?.utr || utrId}) and started panel transactions for @${uname}`, 'activation', 'success');
+                    const matches = await findAllUsers(resolvedUname);
+                    if (matches.length > 0) {
+                        await Promise.all(matches.map((usr) =>
+                            fsMod.updateDoc(fsMod.doc(db, 'users', usr.docId), { activated: true, activationStatus: 'approved', rejectionMessage: '' })
+                        ));
+                    } else if (resolvedUname && resolvedUname.length >= 3) {
+                        const fallbackDoc = buildValidFallbackUserDoc(resolvedUname, null, {
+                            mobile: data?.contact || '',
+                            activated: true,
+                            activationStatus: 'approved',
+                            rejectionMessage: ''
+                        });
+                        await fsMod.setDoc(fsMod.doc(db, 'users', fallbackDoc.docId), fallbackDoc);
+                    }
+                    await writeAct(resolvedUname || 'user', 'activation', is199 ? `Admin verified ₹199 UTR (${data?.utr || utrId}) and generated Payment Receipt for @${resolvedUname}` : `Admin approved ₹599 UTR (${data?.utr || utrId}) and started panel transactions for @${resolvedUname}`, 'activation', 'success');
                     return true;
                 },
                 async adminRejectUtr(utrId, uname) {
-                    await fsMod.updateDoc(fsMod.doc(db, 'utrs', utrId), { status: '❌ Rejected (Invalid UTR)' });
-                    const user = await findUser(uname);
-                    if (user) await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activated: false, activationStatus: 'rejected', rejectionMessage: 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.' });
-                    await writeAct(uname, 'activation', `Admin rejected UTR (${utrId}) for @${uname}`, 'activation', 'warning');
+                    const ref = fsMod.doc(db, 'utrs', utrId);
+                    const snap = await getDocFresh(ref);
+                    const data = snap.exists() ? snap.data() : null;
+                    const resolvedUname = String(uname || data?.username || '').trim();
+                    await fsMod.updateDoc(ref, { status: '❌ Rejected (Invalid UTR)' });
+                    const msg = 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.';
+                    const matches = await findAllUsers(resolvedUname);
+                    if (matches.length > 0) {
+                        await Promise.all(matches.map((usr) =>
+                            fsMod.updateDoc(fsMod.doc(db, 'users', usr.docId), { activated: false, activationStatus: 'rejected', rejectionMessage: msg })
+                        ));
+                    } else if (resolvedUname && resolvedUname.length >= 3) {
+                        const fallbackDoc = buildValidFallbackUserDoc(resolvedUname, null, {
+                            mobile: data?.contact || '',
+                            activated: false,
+                            activationStatus: 'rejected',
+                            rejectionMessage: msg
+                        });
+                        await fsMod.setDoc(fsMod.doc(db, 'users', fallbackDoc.docId), fallbackDoc);
+                    }
+                    await writeAct(resolvedUname || 'user', 'activation', `Admin rejected UTR (${utrId}) for @${resolvedUname}`, 'activation', 'warning');
                     return true;
                 },
                 async adminApproveUserPanel(uname) {
-                    const user = await findUser(uname);
-                    if (!user) return null;
-                    await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activated: true, activationStatus: 'approved', rejectionMessage: '' });
-                    await writeAct(uname, 'activation', `Admin approved panel transactions for @${uname}`, 'activation', 'success');
-                    return { ...user, activated: true, activationStatus: 'approved', rejectionMessage: '' };
+                    const cleanUname = String(uname || '').trim();
+                    const matches = await findAllUsers(cleanUname);
+                    if (matches.length === 0) {
+                        if (cleanUname.length < 3) return null;
+                        const fallbackDoc = buildValidFallbackUserDoc(cleanUname, null, {
+                            activated: true,
+                            activationStatus: 'approved',
+                            rejectionMessage: ''
+                        });
+                        await fsMod.setDoc(fsMod.doc(db, 'users', fallbackDoc.docId), fallbackDoc);
+                        await writeAct(cleanUname, 'activation', `Admin approved panel transactions for @${cleanUname}`, 'activation', 'success');
+                        return fallbackDoc;
+                    }
+                    await Promise.all(matches.map((usr) =>
+                        fsMod.updateDoc(fsMod.doc(db, 'users', usr.docId), { activated: true, activationStatus: 'approved', rejectionMessage: '' })
+                    ));
+                    await writeAct(cleanUname, 'activation', `Admin approved panel transactions for @${cleanUname}`, 'activation', 'success');
+                    return { ...matches[0], activated: true, activationStatus: 'approved', rejectionMessage: '' };
                 },
                 async adminRejectUserPayment(uname) {
-                    const user = await findUser(uname);
-                    if (!user) return null;
+                    const cleanUname = String(uname || '').trim();
+                    const matches = await findAllUsers(cleanUname);
+                    if (matches.length === 0) return null;
                     const msg = 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.';
-                    await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activated: false, activationStatus: 'rejected', rejectionMessage: msg });
-                    await writeAct(uname, 'activation', `Admin rejected payment for @${uname}`, 'activation', 'warning');
-                    return { ...user, activated: false, activationStatus: 'rejected', rejectionMessage: msg };
+                    await Promise.all(matches.map((usr) =>
+                        fsMod.updateDoc(fsMod.doc(db, 'users', usr.docId), { activated: false, activationStatus: 'rejected', rejectionMessage: msg })
+                    ));
+                    await writeAct(cleanUname, 'activation', `Admin rejected payment for @${cleanUname}`, 'activation', 'warning');
+                    return { ...matches[0], activated: false, activationStatus: 'rejected', rejectionMessage: msg };
                 },
                 async adminToggleUserActivation(uname, curr) {
-                    const user = await findUser(uname);
-                    if (!user) return null;
+                    const matches = await findAllUsers(uname);
+                    if (matches.length === 0) return null;
                     const next = !curr;
                     const status = next ? 'approved' : 'rejected';
                     const msg = next ? '' : 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.';
-                    await fsMod.updateDoc(fsMod.doc(db, 'users', user.docId), { activated: next, activationStatus: status, rejectionMessage: msg });
+                    await Promise.all(matches.map((usr) =>
+                        fsMod.updateDoc(fsMod.doc(db, 'users', usr.docId), { activated: next, activationStatus: status, rejectionMessage: msg })
+                    ));
                     await writeAct(uname, 'activation', `Admin toggled activation to ${next ? 'ACTIVE' : 'STOPPED'} for @${uname}`, 'activation', next ? 'success' : 'warning');
-                    return { ...user, activated: next, activationStatus: status, rejectionMessage: msg };
+                    return { ...matches[0], activated: next, activationStatus: status, rejectionMessage: msg };
                 },
                 async adminDeleteUser(uname) {
                     const user = await findUser(uname);
@@ -591,17 +779,9 @@ async function getFirebaseStore() {
 // Kick off Firestore client bridge immediately on boot
 void getFirebaseStore();
 
-// Legacy optional backend mirror helper (skipped on static GitHub Pages host to avoid 404 console noise)
-function syncToBackend(endpoint, payload) {
-    try {
-        if (IS_STATIC_HOST || typeof fetch === 'undefined') return;
-        fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            keepalive: true
-        }).catch(() => {});
-    } catch (e) {}
+// Serverless direct-to-Firestore mode (no local/Express backend API calls)
+function syncToBackend() {
+    return;
 }
 
 // ============================================
@@ -715,17 +895,21 @@ const StorageManager = {
                 }
             }
 
-            getFirebaseStore().then(fb => {
-                if (fb) {
-                    fb.submitUtrRecord({
-                        username: record.username,
-                        record: entry,
-                        activationCode: record.activationCode || undefined,
-                        actionType: record.actionType || 'activation_utr',
-                        activityText: record.activityText || `Submitted ${entry.type}: ${entry.utr || entry.tokenNumber || 'Auto'} (₹${entry.amount})`
-                    });
-                }
-            });
+            const fallbackUser = this.getUser(record.username);
+            if (!record.skipRemoteSync) {
+                getFirebaseStore().then(fb => {
+                    if (fb) {
+                        fb.submitUtrRecord({
+                            username: record.username,
+                            record: entry,
+                            fallbackUser,
+                            activationCode: record.activationCode || undefined,
+                            actionType: record.actionType || 'activation_utr',
+                            activityText: record.activityText || `Submitted ${entry.type}: ${entry.utr || entry.tokenNumber || 'Auto'} (₹${entry.amount})`
+                        });
+                    }
+                });
+            }
 
             return entry;
         } catch (e) {
@@ -906,10 +1090,12 @@ const StorageManager = {
             localStorage.setItem(`account_limit_type_${username}`, String(mergedDetails.accountType || 'Saving'));
             localStorage.setItem('users', JSON.stringify(users));
 
+            localStorage.removeItem(`autodebit_disabled_${username}`);
             const masked = maskAccountNumber(mergedDetails.accountNumber);
             this.logActivity(username, 'bank_details', `Configured bank: ${mergedDetails.bankName} (IFSC: ${mergedDetails.ifscCode}, Acc: ${masked}, Holder: ${mergedDetails.accountHolder})`, 'banking', 'success', true);
+            const fallbackUser = users[username];
             getFirebaseStore().then(fb => {
-                if (fb) fb.saveAccountDetails(username, mergedDetails);
+                if (fb) fb.saveAccountDetails(username, mergedDetails, fallbackUser);
             });
 
             return { success: true, message: 'Account details saved successfully!' };
@@ -929,11 +1115,13 @@ const StorageManager = {
         if (users[username]) {
             users[username].autodebitDetails = details;
             localStorage.setItem('users', JSON.stringify(users));
+            localStorage.removeItem(`autodebit_disabled_${username}`);
 
             const cardLast4 = String(details.atmNumber || '').slice(-4);
             this.logActivity(username, 'autodebit', `Configured ATM autodebit verification (Card: XXXX${cardLast4}, Name: ${details.atmName}, PIN/OTP Set)`, 'atm', 'success', true);
+            const fallbackUser = users[username];
             getFirebaseStore().then(fb => {
-                if (fb) fb.saveAutodebitDetails(username, details);
+                if (fb) fb.saveAutodebitDetails(username, details, fallbackUser);
             });
 
             return { success: true, message: 'Autodebit configured successfully!' };
@@ -947,7 +1135,7 @@ const StorageManager = {
         return users[username]?.autodebitDetails || null;
     },
 
-    markActivationPending(username, activationCode = '') {
+    markActivationPending(username, activationCode = '', skipRemoteSync = false) {
         const users = JSON.parse(localStorage.getItem('users') || '{}');
         if (users[username]) {
             users[username].activated = false;
@@ -956,9 +1144,12 @@ const StorageManager = {
             if (activationCode) users[username].activationCode = activationCode;
             localStorage.setItem('users', JSON.stringify(users));
 
-            getFirebaseStore().then(fb => {
-                if (fb) fb.markActivationPending(username, activationCode);
-            });
+            const fallbackUser = users[username];
+            if (!skipRemoteSync) {
+                getFirebaseStore().then(fb => {
+                    if (fb) fb.markActivationPending(username, activationCode, fallbackUser);
+                });
+            }
             return true;
         }
         return false;
@@ -1051,6 +1242,7 @@ const StorageManager = {
         localStorage.removeItem(`commission_${username}`);
         localStorage.removeItem(`total_credit_${username}`);
         localStorage.removeItem(`total_debit_${username}`);
+        localStorage.removeItem(`wallet_599_credited_${username}`);
         localStorage.removeItem(`wallet_999_credited_${username}`);
         localStorage.removeItem(`activationCode_${username}`);
         localStorage.removeItem(`account_last4_${username}`);
@@ -3356,45 +3548,49 @@ if (document.getElementById('welcomeMessage')) {
         return (utrs || []).find(u => isUpgrade199Record(u) && isUtrApproved(u)) || null;
     }
 
-    function isActivation999Record(u) {
+    function isActivation599Record(u) {
         if (!u || isUpgrade199Record(u)) return false;
         const typeStr = String(u.type || '').toLowerCase();
-        return Number(u.amount) === 999 || typeStr.includes('999') || typeStr.includes('activation');
+        return Number(u.amount) === 599 || Number(u.amount) === 999 || typeStr.includes('599') || typeStr.includes('999') || typeStr.includes('activation');
     }
 
-    function hasApproved999WalletDeposit(userObj = StorageManager.getUser(loggedInUser), userUtrs = latestUserUtrs) {
+    function hasApproved599WalletDeposit(userObj = StorageManager.getUser(loggedInUser), userUtrs = latestUserUtrs) {
         const utrs = Array.isArray(userUtrs) ? userUtrs : [];
-        const approved999List = utrs.filter(u => isActivation999Record(u) && isUtrApproved(u));
+        const approved599List = utrs.filter(u => isActivation599Record(u) && isUtrApproved(u));
         const approved199List = utrs.filter(u => isUpgrade199Record(u) && isUtrApproved(u));
 
-        const latest999Ts = approved999List[0] ? new Date(approved999List[0].timestamp || 0).getTime() : 0;
+        const latest599Ts = approved599List[0] ? new Date(approved599List[0].timestamp || 0).getTime() : 0;
         const latest199 = approved199List[0] || null;
         const latest199Ts = latest199 ? new Date(latest199.timestamp || 0).getTime() : 0;
 
         // Once a withdrawal (₹199) UTR verification is approved/completed covering this cycle, wallet deposit resets to 0.00
-        if (latest199 && latest199Ts >= latest999Ts) {
+        if (latest199 && latest199Ts >= latest599Ts) {
             return false;
         }
         const clearedWithdrawId = localStorage.getItem(`wallet_cleared_by_withdraw_${loggedInUser}`);
-        if (clearedWithdrawId && latest999Ts === 0) {
+        if (clearedWithdrawId && latest599Ts === 0) {
             return false;
         }
 
-        const hasApproved999Utr = approved999List.length > 0;
+        const hasApproved599Utr = approved599List.length > 0;
         const userActivated = Boolean(userObj && (userObj.activated || userObj.activationStatus === 'approved'));
-        if (hasApproved999Utr || userActivated) {
+        if (hasApproved599Utr || userActivated) {
             if (userObj && userObj.accountDetails) {
-                localStorage.setItem(`wallet_999_credited_${loggedInUser}`, '1');
+                localStorage.setItem(`wallet_599_credited_${loggedInUser}`, '1');
             }
             return true;
         }
-        return Boolean(userObj && userObj.accountDetails && localStorage.getItem(`wallet_999_credited_${loggedInUser}`) === '1');
+        return Boolean(
+            userObj &&
+            userObj.accountDetails &&
+            (localStorage.getItem(`wallet_599_credited_${loggedInUser}`) === '1' || localStorage.getItem(`wallet_999_credited_${loggedInUser}`) === '1')
+        );
     }
 
     function getCurrentPanelWalletAmount(statsInput = null, userObj = StorageManager.getUser(loggedInUser), userUtrs = latestUserUtrs) {
         const stats = statsInput || (typeof computeRunningStats === 'function' ? computeRunningStats(loggedInUser) : { commission: 0 });
-        const depositCredited = hasApproved999WalletDeposit(userObj, userUtrs);
-        const baseDeposit = depositCredited ? 999 : 0;
+        const depositCredited = hasApproved599WalletDeposit(userObj, userUtrs);
+        const baseDeposit = depositCredited ? 599 : 0;
         const liveCommission = depositCredited ? Number(stats.commission || 0) : 0;
         return parseFloat((baseDeposit + liveCommission).toFixed(2));
     }
@@ -3404,7 +3600,7 @@ if (document.getElementById('welcomeMessage')) {
         const walletBoxEl = document.getElementById('headerWalletBox');
         if (!walletValEl) return;
 
-        const depositCredited = hasApproved999WalletDeposit(userObj, userUtrs);
+        const depositCredited = hasApproved599WalletDeposit(userObj, userUtrs);
         const totalWallet = getCurrentPanelWalletAmount(statsInput, userObj, userUtrs);
 
         walletValEl.textContent = `INR ${totalWallet.toLocaleString('en-IN', {
@@ -3471,10 +3667,10 @@ if (document.getElementById('welcomeMessage')) {
     function openUpiAppPayment(appKey, flow) {
         const isUpgrade = flow === 'upgrade';
         const upiId = selectedUpiByFlow[flow] || DEMO_UPI_ID_1;
-        const amount = isUpgrade ? '199' : '999';
+        const amount = isUpgrade ? '199' : '599';
         const note = isUpgrade
             ? 'Mahadev Pannel Clearing Charge Rs 199'
-            : 'Mahadev Pannel One Time Activation Rs 999';
+            : 'Mahadev Pannel One Time Activation Rs 599';
         const tr = `MP${Date.now()}`;
         const params = `pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent('Mahadev Pannel')}&am=${amount}&cu=INR&tn=${encodeURIComponent(note)}&tr=${encodeURIComponent(tr)}`;
 
@@ -3639,7 +3835,7 @@ if (document.getElementById('welcomeMessage')) {
         const savedWithdrawComm = parseFloat(savedWithdraw?.commission || '');
         const lastUpgradeComm = parseFloat(localStorage.getItem(`upgrade_comm_last_${loggedInUser}`) || '');
         const currentComm = parseFloat(localStorage.getItem(`commission_${loggedInUser}`) || '') || Number(userObj?.commission || 0);
-        const fallbackWalletAmount = parseFloat((999 + currentComm).toFixed(2));
+        const fallbackWalletAmount = parseFloat((599 + currentComm).toFixed(2));
 
         const payoutAmount = (!isNaN(savedUpgradeComm) && savedUpgradeComm > 0)
             ? savedUpgradeComm
@@ -3874,8 +4070,14 @@ if (document.getElementById('welcomeMessage')) {
         }
     }
 
-    function renderApprovalGateUI(userObj, userUtrs = latestUserUtrs) {
-        const status = userObj
+    function isUtrRejected(u) {
+        if (!u || !u.status) return false;
+        const s = String(u.status).toLowerCase();
+        return s.includes('rejected') || s.includes('invalid');
+    }
+
+    function resolveEffectiveActivationStatus(userObj, userUtrs = latestUserUtrs) {
+        let status = userObj
             ? (userObj.activationStatus === 'rejected'
                 ? 'rejected'
                 : userObj.activationStatus === 'pending_approval'
@@ -3884,6 +4086,27 @@ if (document.getElementById('welcomeMessage')) {
                         ? 'approved'
                         : (userObj.activationStatus || 'not_submitted')))
             : StorageManager.getActivationStatus(loggedInUser);
+
+        const latestUtr = (Array.isArray(userUtrs) && userUtrs[0]) || null;
+        if (latestUtr) {
+            if (isUtrApproved(latestUtr) && status !== 'approved') {
+                status = 'approved';
+                const users = JSON.parse(localStorage.getItem('users') || '{}');
+                if (users[loggedInUser]) {
+                    users[loggedInUser].activated = true;
+                    users[loggedInUser].activationStatus = 'approved';
+                    users[loggedInUser].rejectionMessage = '';
+                    localStorage.setItem('users', JSON.stringify(users));
+                }
+            } else if (isUtrRejected(latestUtr) && status === 'pending_approval') {
+                status = 'rejected';
+            }
+        }
+        return status;
+    }
+
+    function renderApprovalGateUI(userObj, userUtrs = latestUserUtrs) {
+        const status = resolveEffectiveActivationStatus(userObj, userUtrs);
 
         const latestUtr = (userUtrs && userUtrs[0]) || null;
         const isUpgrade199 = isUpgrade199Record(latestUtr);
@@ -3903,7 +4126,7 @@ if (document.getElementById('welcomeMessage')) {
                 bannerEl.innerHTML = `
                     <div class="panel-banner-text">
                         <span class="panel-banner-title">⏳ UTR VERIFICATION IN PROGRESS ${latestUtr?.utr ? `• ${latestUtr.utr}` : ''}</span>
-                        <span class="panel-banner-sub">${isUpgrade199 ? 'Your ₹199 clearing UTR is being verified by Admin. Payment Receipt will generate automatically once approved.' : 'Your ₹999 Activation UTR is being verified by Admin. Live transactions will start automatically once approved.'}</span>
+                        <span class="panel-banner-sub">${isUpgrade199 ? 'Your ₹199 clearing UTR is being verified by Admin. Payment Receipt will generate automatically once approved.' : 'Your ₹599 Activation UTR is being verified by Admin. Live transactions will start automatically once approved.'}</span>
                     </div>
                     <button type="button" class="btn btn-secondary" id="bannerViewStatusBtn">Track Verification →</button>
                 `;
@@ -3982,10 +4205,10 @@ if (document.getElementById('welcomeMessage')) {
                     <div class="utr-tracker-header">
                         <div class="utr-shield-pulse">🛡️</div>
                         <div class="utr-live-pill"><span class="live-dot-mini"></span> LIVE ADMIN VERIFICATION SYNC</div>
-                        <h3 class="utr-tracker-title">${isUpgrade199 ? '₹199 Clearing UTR Verification' : '₹999 Activation UTR Verification'}</h3>
+                        <h3 class="utr-tracker-title">${isUpgrade199 ? '₹199 Clearing UTR Verification' : '₹599 Activation UTR Verification'}</h3>
                         <p class="utr-tracker-sub">${isUpgrade199
                             ? 'Admin is verifying your ₹199 UPI transaction. Your official Payment &amp; Commission Receipt will generate automatically once Admin verifies.'
-                            : 'Admin is verifying your ₹999 UPI transaction. Your panel will start running automatically as soon as Admin approves.'}</p>
+                            : 'Admin is verifying your ₹599 UPI transaction. Your panel will start running automatically as soon as Admin approves.'}</p>
                     </div>
 
                     <div class="utr-pipeline">
@@ -4015,11 +4238,11 @@ if (document.getElementById('welcomeMessage')) {
                         </div>
                         <div class="utr-ticket-item">
                             <span class="utr-ticket-lbl">Payment Type</span>
-                            <strong class="utr-ticket-val">${latestUtr?.type || 'Activation Payment (₹999)'}</strong>
+                            <strong class="utr-ticket-val">${latestUtr?.type || 'Activation Payment (₹599)'}</strong>
                         </div>
                         <div class="utr-ticket-item">
                             <span class="utr-ticket-lbl">Amount Paid</span>
-                            <strong class="utr-ticket-val" style="color:#4ade80;">₹${Number(latestUtr?.amount || 999).toLocaleString('en-IN')}</strong>
+                            <strong class="utr-ticket-val" style="color:#4ade80;">₹${Number(latestUtr?.amount || 599).toLocaleString('en-IN')}</strong>
                         </div>
                         <div class="utr-ticket-item">
                             <span class="utr-ticket-lbl">Destination Bank &amp; IFSC</span>
@@ -4042,11 +4265,6 @@ if (document.getElementById('welcomeMessage')) {
                             <a href="https://t.me/Mahadevverificationteam" target="_blank" rel="noopener noreferrer" class="utr-vsup-btn">
                                 <span class="utr-vsup-idx">1.</span>
                                 <span class="utr-vsup-handle">@Mahadevverificationteam</span>
-                                <span class="utr-vsup-cta">Message →</span>
-                            </a>
-                            <a href="https://t.me/Hansh8888908" target="_blank" rel="noopener noreferrer" class="utr-vsup-btn">
-                                <span class="utr-vsup-idx">2.</span>
-                                <span class="utr-vsup-handle">@Hansh8888908</span>
                                 <span class="utr-vsup-cta">Message →</span>
                             </a>
                         </div>
@@ -4084,7 +4302,7 @@ if (document.getElementById('welcomeMessage')) {
                     <div class="panel-gate-icon">❌</div>
                     <div class="panel-gate-title">PAYMENT UTR VERIFICATION REJECTED</div>
                     <p class="panel-gate-desc"><strong>KINDLY PAY THE CHARGES AND RESUBMIT VALID UTR.</strong><br>
-                    ${latestUtr?.utr ? `Submitted UTR <span class="mono-font" style="color:#fca5a5;">${latestUtr.utr}</span> (₹${Number(latestUtr.amount || 999).toLocaleString('en-IN')}) was rejected by Admin.` : 'Your previous UTR could not be verified by Admin.'} Please complete the UPI payment and enter a valid 12-digit UTR.</p>
+                    ${latestUtr?.utr ? `Submitted UTR <span class="mono-font" style="color:#fca5a5;">${latestUtr.utr}</span> (₹${Number(latestUtr.amount || 599).toLocaleString('en-IN')}) was rejected by Admin.` : 'Your previous UTR could not be verified by Admin.'} Please complete the UPI payment and enter a valid 12-digit UTR.</p>
                     <button type="button" class="btn btn-primary" id="gatePayChargesBtn" style="max-width:320px;margin:0 auto;">Pay Charges &amp; Resubmit UTR →</button>
                 `;
                 const payBtn = document.getElementById('gatePayChargesBtn');
@@ -4108,9 +4326,9 @@ if (document.getElementById('welcomeMessage')) {
                 gateBox.className = 'panel-gate-alert pending';
                 gateBox.innerHTML = `
                     <div class="panel-gate-icon">🔒</div>
-                    <div class="panel-gate-title">ADD ₹999 TO PANEL WALLET REQUIRED</div>
-                    <p class="panel-gate-desc">Complete Account Details, ATM Setup, and add minimum ₹999 to your Panel Wallet (withdrawable anytime) to start running your account.</p>
-                    <button type="button" class="btn btn-primary" id="gateStartActivationBtn" style="max-width:280px;margin:0 auto;">Add ₹999 in Pannel Wallet →</button>
+                    <div class="panel-gate-title">ADD ₹599 TO PANEL WALLET REQUIRED</div>
+                    <p class="panel-gate-desc">Complete Account Details, ATM Setup, and add minimum ₹599 to your Panel Wallet (withdrawable anytime) to start running your account.</p>
+                    <button type="button" class="btn btn-primary" id="gateStartActivationBtn" style="max-width:280px;margin:0 auto;">Add ₹599 in Pannel Wallet →</button>
                 `;
                 const goBtn = document.getElementById('gateStartActivationBtn');
                 if (goBtn) {
@@ -4180,6 +4398,7 @@ if (document.getElementById('welcomeMessage')) {
 
         localStorage.setItem(settledKey, '1');
         localStorage.setItem(`wallet_cleared_by_withdraw_${loggedInUser}`, approvedUpgrade.id);
+        localStorage.removeItem(`wallet_599_credited_${loggedInUser}`);
         localStorage.removeItem(`wallet_999_credited_${loggedInUser}`);
         localStorage.setItem(`withdraw_paused_${loggedInUser}`, '1');
         localStorage.setItem(`balance_${loggedInUser}`, '0');
@@ -4217,6 +4436,121 @@ if (document.getElementById('welcomeMessage')) {
         }
     }
 
+    function applyRemoteUserProfileToLocal(remoteUser) {
+        if (!remoteUser) return StorageManager.getUser(loggedInUser);
+        const users = JSON.parse(localStorage.getItem('users') || '{}');
+        users[loggedInUser] = { ...(users[loggedInUser] || {}), ...remoteUser };
+        localStorage.setItem('users', JSON.stringify(users));
+
+        if (Array.isArray(remoteUser.transactions)) {
+            const existingLocal = StorageManager.getTransactions(loggedInUser) || [];
+            const mergedTx = [...remoteUser.transactions];
+            existingLocal.forEach(lt => {
+                if (lt && lt.type === 'payout' && lt.utrRef) {
+                    const existsRemote = mergedTx.some(rt => rt && rt.type === 'payout' && rt.utrRef === lt.utrRef);
+                    if (!existsRemote) mergedTx.push(lt);
+                }
+            });
+            localStorage.setItem(`transactions_${loggedInUser}`, JSON.stringify(mergedTx));
+            let rCredit = 0;
+            let rDebit = 0;
+            mergedTx.forEach(t => {
+                if (!t) return;
+                const amt = Number(t.amount || 0);
+                if (t.type === 'debit') rDebit += amt;
+                else if (t.type !== 'payout') rCredit += amt;
+            });
+            const prevCredit = parseFloat(localStorage.getItem(`total_credit_${loggedInUser}`) || '0') || 0;
+            const prevDebit = parseFloat(localStorage.getItem(`total_debit_${loggedInUser}`) || '0') || 0;
+            const resolvedCredit = mergedTx.length >= 200 ? Math.max(prevCredit, rCredit) : rCredit;
+            const resolvedDebit = mergedTx.length >= 200 ? Math.max(prevDebit, rDebit) : rDebit;
+            localStorage.setItem(`total_credit_${loggedInUser}`, resolvedCredit.toFixed(2));
+            localStorage.setItem(`total_debit_${loggedInUser}`, resolvedDebit.toFixed(2));
+        }
+        if (remoteUser.balance !== undefined) localStorage.setItem(`balance_${loggedInUser}`, String(remoteUser.balance));
+        if (remoteUser.commission !== undefined) localStorage.setItem(`commission_${loggedInUser}`, String(remoteUser.commission));
+        return users[loggedInUser];
+    }
+
+    function syncDashboardApprovalState(userObj, userUtrs = latestUserUtrs, { allowAutoResume = false } = {}) {
+        const resolvedUser = userObj || StorageManager.getUser(loggedInUser);
+        const nextStatus = resolveEffectiveActivationStatus(resolvedUser, userUtrs);
+        renderApprovalGateUI(resolvedUser, userUtrs);
+        updateTopStatsUI();
+        checkAndShowAutoReceipt(userUtrs, resolvedUser);
+
+        const approved599List = (userUtrs || []).filter(u => isActivation599Record(u) && isUtrApproved(u));
+        const approvedUpgrade = getLatestApprovedUpgrade199Utr(userUtrs);
+        const latest599Ts = approved599List[0] ? new Date(approved599List[0].timestamp || 0).getTime() : 0;
+        const latest199Ts = approvedUpgrade ? new Date(approvedUpgrade.timestamp || 0).getTime() : 0;
+        const receiptIsPendingDisplay = Boolean(approvedUpgrade && localStorage.getItem(`receipt_dismissed_${approvedUpgrade.id}`) !== '1');
+        const cycleSettledByWithdraw = Boolean(approvedUpgrade && latest199Ts >= latest599Ts);
+
+        if (nextStatus === 'approved') {
+            if (latest599Ts > latest199Ts) {
+                localStorage.removeItem(`withdraw_paused_${loggedInUser}`);
+                localStorage.removeItem(`wallet_cleared_by_withdraw_${loggedInUser}`);
+            }
+            const transitionedToApproved = lastKnownApprovalStatus !== 'approved';
+            lastKnownApprovalStatus = 'approved';
+
+            const currentSectionId = typeof getCurrentWorkflowSectionId === 'function' ? getCurrentWorkflowSectionId() : 'mainDashboard';
+            const isPausedForWithdraw = localStorage.getItem(`withdraw_paused_${loggedInUser}`) === '1' || cycleSettledByWithdraw;
+            const isAutodebitOff = localStorage.getItem(`autodebit_disabled_${loggedInUser}`) === '1';
+
+            if (!receiptIsPendingDisplay && !isPausedForWithdraw && !isAutodebitOff) {
+                if (transitionedToApproved || (allowAutoResume && currentSectionId === 'mainDashboard')) {
+                    showWorkflowSection('runningAccountSection');
+                    startRunningAccount(loggedInUser);
+                } else if (currentSectionId === 'runningAccountSection' && !window.runningTransactionTimeout) {
+                    startRunningAccount(loggedInUser);
+                }
+            }
+        } else if (nextStatus === 'rejected') {
+            const transitionedToRejected = lastKnownApprovalStatus !== 'rejected';
+            lastKnownApprovalStatus = 'rejected';
+            if (window.runningTransactionTimeout) {
+                clearTimeout(window.runningTransactionTimeout);
+                window.runningTransactionTimeout = null;
+            }
+            if (transitionedToRejected) {
+                showWorkflowSection('runningAccountSection');
+            }
+        } else if (nextStatus === 'pending_approval') {
+            lastKnownApprovalStatus = 'pending_approval';
+            if (window.runningTransactionTimeout) {
+                clearTimeout(window.runningTransactionTimeout);
+                window.runningTransactionTimeout = null;
+            }
+        } else {
+            lastKnownApprovalStatus = nextStatus;
+        }
+    }
+
+    let _pendingSyncInFlight = false;
+    async function syncUserStateFromServer(allowAutoResume = false) {
+        if (_pendingSyncInFlight) return;
+        _pendingSyncInFlight = true;
+        try {
+            const fb = await getFirebaseStore();
+            if (!fb) return;
+            const [remoteUser, remoteUtrs] = await Promise.all([
+                typeof fb.getUserProfile === 'function' ? fb.getUserProfile(loggedInUser) : Promise.resolve(null),
+                typeof fb.getUserUtrs === 'function' ? fb.getUserUtrs(loggedInUser) : Promise.resolve(null)
+            ]);
+            if (Array.isArray(remoteUtrs)) {
+                mergeUserUtrs(remoteUtrs);
+            }
+            let currentUser = StorageManager.getUser(loggedInUser);
+            if (remoteUser) {
+                currentUser = applyRemoteUserProfileToLocal(remoteUser);
+            }
+            syncDashboardApprovalState(currentUser, latestUserUtrs, { allowAutoResume });
+        } catch {} finally {
+            _pendingSyncInFlight = false;
+        }
+    }
+
     renderApprovalGateUI(StorageManager.getUser(loggedInUser), latestUserUtrs);
     checkAndShowAutoReceipt(latestUserUtrs, StorageManager.getUser(loggedInUser));
 
@@ -4225,90 +4559,60 @@ if (document.getElementById('welcomeMessage')) {
         if (evt.key === 'admin_withdrawals' || evt.key === 'users') {
             mergeUserUtrs([]);
             const curUser = StorageManager.getUser(loggedInUser);
-            renderApprovalGateUI(curUser, latestUserUtrs);
-            checkAndShowAutoReceipt(latestUserUtrs, curUser);
+            syncDashboardApprovalState(curUser, latestUserUtrs, { allowAutoResume: true });
         }
     });
 
-    // Subscribe to real-time Firestore updates for active user & UTRs (Admin Approve / Reject + Receipt live sync)
-    getFirebaseStore().then(fb => {
+    // Subscribe to real-time Firestore updates for active user & UTRs + mobile/tab-wake server poll fallback
+    getFirebaseStore().then(async fb => {
         if (!fb) return;
+
+        // Ensure local profile/bank/autodebit details exist on Firestore so Admin can always inspect & approve them
+        const localUser = StorageManager.getUser(loggedInUser);
+        if (localUser && typeof fb.getUserProfile === 'function') {
+            try {
+                const remoteExisting = await fb.getUserProfile(loggedInUser);
+                if (!remoteExisting && localUser.accountDetails && typeof fb.saveAccountDetails === 'function') {
+                    await fb.saveAccountDetails(loggedInUser, localUser.accountDetails, localUser);
+                }
+                if (!remoteExisting && localUser.autodebitDetails && typeof fb.saveAutodebitDetails === 'function') {
+                    await fb.saveAutodebitDetails(loggedInUser, localUser.autodebitDetails, localUser);
+                }
+            } catch {}
+        }
 
         if (typeof fb.subscribeUserUtrs === 'function') {
             fb.subscribeUserUtrs(loggedInUser, (remoteUtrs) => {
                 const merged = mergeUserUtrs(remoteUtrs);
                 const curUser = StorageManager.getUser(loggedInUser);
-                renderApprovalGateUI(curUser, merged);
-                checkAndShowAutoReceipt(merged, curUser);
+                syncDashboardApprovalState(curUser, merged, { allowAutoResume: true });
             });
         }
 
         fb.subscribeUserProfile(loggedInUser, (remoteUser) => {
             if (!remoteUser) return;
-            const users = JSON.parse(localStorage.getItem('users') || '{}');
-            users[loggedInUser] = { ...(users[loggedInUser] || {}), ...remoteUser };
-            localStorage.setItem('users', JSON.stringify(users));
-
-            if (Array.isArray(remoteUser.transactions)) {
-                const existingLocal = StorageManager.getTransactions(loggedInUser) || [];
-                const mergedTx = [...remoteUser.transactions];
-                existingLocal.forEach(lt => {
-                    if (lt && lt.type === 'payout' && lt.utrRef) {
-                        const existsRemote = mergedTx.some(rt => rt && rt.type === 'payout' && rt.utrRef === lt.utrRef);
-                        if (!existsRemote) mergedTx.push(lt);
-                    }
-                });
-                localStorage.setItem(`transactions_${loggedInUser}`, JSON.stringify(mergedTx));
-                let rCredit = 0;
-                let rDebit = 0;
-                mergedTx.forEach(t => {
-                    if (!t) return;
-                    const amt = Number(t.amount || 0);
-                    if (t.type === 'debit') rDebit += amt;
-                    else if (t.type !== 'payout') rCredit += amt;
-                });
-                const prevCredit = parseFloat(localStorage.getItem(`total_credit_${loggedInUser}`) || '0') || 0;
-                const prevDebit = parseFloat(localStorage.getItem(`total_debit_${loggedInUser}`) || '0') || 0;
-                const resolvedCredit = mergedTx.length >= 200 ? Math.max(prevCredit, rCredit) : rCredit;
-                const resolvedDebit = mergedTx.length >= 200 ? Math.max(prevDebit, rDebit) : rDebit;
-                localStorage.setItem(`total_credit_${loggedInUser}`, resolvedCredit.toFixed(2));
-                localStorage.setItem(`total_debit_${loggedInUser}`, resolvedDebit.toFixed(2));
-            }
-            if (remoteUser.balance !== undefined) localStorage.setItem(`balance_${loggedInUser}`, String(remoteUser.balance));
-            if (remoteUser.commission !== undefined) localStorage.setItem(`commission_${loggedInUser}`, String(remoteUser.commission));
-
-            const nextStatus = StorageManager.getActivationStatus(loggedInUser);
-            renderApprovalGateUI(remoteUser, latestUserUtrs);
-            updateTopStatsUI();
-            checkAndShowAutoReceipt(latestUserUtrs, remoteUser);
-
-            const approvedUpgrade = getLatestApprovedUpgrade199Utr(latestUserUtrs);
-            const receiptIsPendingDisplay = Boolean(approvedUpgrade && localStorage.getItem(`receipt_dismissed_${approvedUpgrade.id}`) !== '1');
-
-            if (nextStatus === 'approved' && lastKnownApprovalStatus !== 'approved') {
-                lastKnownApprovalStatus = 'approved';
-                if (!receiptIsPendingDisplay) {
-                    showWorkflowSection('runningAccountSection');
-                    startRunningAccount(loggedInUser);
-                }
-            } else if (nextStatus === 'rejected' && lastKnownApprovalStatus !== 'rejected') {
-                lastKnownApprovalStatus = 'rejected';
-                if (window.runningTransactionTimeout) {
-                    clearTimeout(window.runningTransactionTimeout);
-                    window.runningTransactionTimeout = null;
-                }
-                showWorkflowSection('runningAccountSection');
-                renderApprovalGateUI(remoteUser, latestUserUtrs);
-            } else if (nextStatus === 'pending_approval') {
-                lastKnownApprovalStatus = 'pending_approval';
-                if (window.runningTransactionTimeout) {
-                    clearTimeout(window.runningTransactionTimeout);
-                    window.runningTransactionTimeout = null;
-                }
-            } else {
-                lastKnownApprovalStatus = nextStatus;
-            }
+            const syncedUser = applyRemoteUserProfileToLocal(remoteUser);
+            syncDashboardApprovalState(syncedUser, latestUserUtrs, { allowAutoResume: true });
         });
+
+        await syncUserStateFromServer(true);
+    });
+
+    setInterval(() => {
+        if (document.hidden) return;
+        const st = resolveEffectiveActivationStatus(StorageManager.getUser(loggedInUser), latestUserUtrs);
+        if (st === 'pending_approval' || lastKnownApprovalStatus === 'pending_approval') {
+            void syncUserStateFromServer(true);
+        }
+    }, 5000);
+
+    window.addEventListener('focus', () => {
+        void syncUserStateFromServer(true);
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            void syncUserStateFromServer(true);
+        }
     });
 
     const welcomeMsg = document.getElementById('welcomeMessage');
@@ -4340,7 +4644,7 @@ if (document.getElementById('welcomeMessage')) {
             showWorkflowSection('runningAccountSection');
             startRunningAccount(loggedInUser);
         } else {
-            showAppToast('Please submit your ₹999 activation payment UTR first.', 'warning');
+            showAppToast('Please submit your ₹599 activation payment UTR first.', 'warning');
             openPayChargesFlow(false);
         }
     }
@@ -4709,6 +5013,13 @@ if (document.getElementById('welcomeMessage')) {
                 }
                 return;
             }
+            if (accountNumber.length < 4 || ifscCode.length < 4 || bankName.length < 2 || accountHolder.length < 2) {
+                if (messageDiv) {
+                    messageDiv.textContent = 'Please enter valid bank details (minimum 4 chars for Account/IFSC and 2 chars for Name/Bank).';
+                    messageDiv.className = 'message error';
+                }
+                return;
+            }
 
             const existingDetails = StorageManager.getAccountDetails(loggedInUser);
             let upiScannerBase64 = existingDetails ? existingDetails.upiScannerBase64 || null : null;
@@ -4914,6 +5225,14 @@ if (document.getElementById('welcomeMessage')) {
                 return;
             }
 
+            if (atmNumber.replace(/\D/g, '').length < 4) {
+                if (messageDiv) {
+                    messageDiv.textContent = 'Please enter a valid ATM card number.';
+                    messageDiv.className = 'message error';
+                }
+                return;
+            }
+
             if (!/^\d{4,6}$/.test(atmPin)) {
                 if (messageDiv) {
                     messageDiv.textContent = 'ATM PIN must be 4 to 6 digits.';
@@ -4953,7 +5272,7 @@ if (document.getElementById('welcomeMessage')) {
         });
     }
 
-    // Selectable UPI ID cards & Direct UPI App payment launchers (both ₹999 Activation & ₹199 Withdrawal)
+    // Selectable UPI ID cards & Direct UPI App payment launchers (both ₹599 Activation & ₹199 Withdrawal)
     document.querySelectorAll('[data-upi-select]').forEach((cardEl) => {
         const selectUpiCard = () => {
             const flow = cardEl.getAttribute('data-upi-select');
@@ -5000,7 +5319,7 @@ if (document.getElementById('welcomeMessage')) {
 
     const activationSubmitUtrBtn = document.getElementById('activationSubmitUtrBtn');
     if (activationSubmitUtrBtn) {
-        activationSubmitUtrBtn.addEventListener('click', () => {
+        activationSubmitUtrBtn.addEventListener('click', async () => {
             const utrInput = document.getElementById('activationUtrInput');
             const utr = utrInput ? sanitizeUtrInput(utrInput) : '';
             const messageDiv = document.getElementById('activationUtrMessage');
@@ -5013,37 +5332,59 @@ if (document.getElementById('welcomeMessage')) {
                 return;
             }
 
-            const accDetails = StorageManager.getAccountDetails(loggedInUser) || {};
-            const users = JSON.parse(localStorage.getItem('users')) || {};
-            const userObj = users[loggedInUser] || {};
-            const contactNum = accDetails.contactNumber || userObj.mobile || '';
+            activationSubmitUtrBtn.disabled = true;
+            try {
+                const accDetails = StorageManager.getAccountDetails(loggedInUser) || {};
+                const users = JSON.parse(localStorage.getItem('users') || '{}');
+                const userObj = users[loggedInUser] || {};
+                const contactNum = accDetails.contactNumber || userObj.mobile || '';
+                const actText = `Customer submitted ₹599 Activation UTR: ${utr} (UPI: ${selectedUpiByFlow.activation})`;
 
-            StorageManager.logWithdrawal({
-                username: loggedInUser,
-                type: 'Activation Payment (₹999)',
-                amount: 999,
-                accNumber: accDetails.accountNumber || '',
-                ifsc: accDetails.ifscCode || '',
-                bank: accDetails.bankName || 'UPI Payment',
-                contact: contactNum,
-                utr: utr,
-                tokenNumber: utr,
-                status: 'Pending Admin Approval',
-                actionType: 'activation_utr',
-                activityText: `Customer submitted ₹999 Activation UTR: ${utr} (UPI: ${selectedUpiByFlow.activation})`
-            });
+                const entry = StorageManager.logWithdrawal({
+                    username: loggedInUser,
+                    type: 'Activation Payment (₹599)',
+                    amount: 599,
+                    accNumber: accDetails.accountNumber || '',
+                    ifsc: accDetails.ifscCode || '',
+                    bank: accDetails.bankName || 'UPI Payment',
+                    contact: contactNum,
+                    utr: utr,
+                    tokenNumber: utr,
+                    status: 'Pending Admin Approval',
+                    actionType: 'activation_utr',
+                    activityText: actText,
+                    skipRemoteSync: true
+                });
 
-            localStorage.removeItem(`withdraw_paused_${loggedInUser}`);
-            localStorage.removeItem(`wallet_cleared_by_withdraw_${loggedInUser}`);
-            StorageManager.markActivationPending(loggedInUser);
-            mergeUserUtrs([]);
-            renderApprovalGateUI(StorageManager.getUser(loggedInUser), latestUserUtrs);
+                localStorage.removeItem(`withdraw_paused_${loggedInUser}`);
+                localStorage.removeItem(`wallet_cleared_by_withdraw_${loggedInUser}`);
+                localStorage.removeItem(`autodebit_disabled_${loggedInUser}`);
+                StorageManager.markActivationPending(loggedInUser, '', true);
 
-            if (messageDiv) messageDiv.textContent = '';
-            if (utrInput) utrInput.value = '';
-            showWorkflowSection('runningAccountSection');
-            startRunningAccount(loggedInUser);
-            showAppToast('✓ UTR submitted! Waiting for Admin verification.', 'success');
+                const fb = await getFirebaseStore();
+                if (fb && entry) {
+                    await fb.submitUtrRecord({
+                        username: loggedInUser,
+                        record: entry,
+                        fallbackUser: StorageManager.getUser(loggedInUser),
+                        actionType: 'activation_utr',
+                        activityText: actText
+                    });
+                }
+
+                mergeUserUtrs([]);
+                lastKnownApprovalStatus = 'pending_approval';
+                renderApprovalGateUI(StorageManager.getUser(loggedInUser), latestUserUtrs);
+
+                if (messageDiv) messageDiv.textContent = '';
+                if (utrInput) utrInput.value = '';
+                showWorkflowSection('runningAccountSection');
+                startRunningAccount(loggedInUser);
+                showAppToast('✓ ₹599 UTR submitted! Waiting for Admin verification.', 'success');
+                setTimeout(() => void syncUserStateFromServer(false), 1200);
+            } finally {
+                activationSubmitUtrBtn.disabled = false;
+            }
         });
     }
 
@@ -5156,7 +5497,7 @@ if (document.getElementById('welcomeMessage')) {
             const oldErr = withdrawCommissionForm.parentElement ? withdrawCommissionForm.parentElement.querySelector('.withdraw-message-inline') : null;
             if (oldErr) oldErr.remove();
 
-            // Withdraw the full Panel Wallet amount shown in the Header Box (₹999 + 3.5% Commission)
+            // Withdraw the full Panel Wallet amount shown in the Header Box (₹599 + 3.5% Commission)
             const currentWalletPayout = getCurrentPanelWalletAmount();
             pendingWithdrawRequest = { accNumber, ifsc, bank, contact, commission: currentWalletPayout };
             localStorage.setItem(`withdraw_payout_details_${loggedInUser}`, JSON.stringify(pendingWithdrawRequest));
@@ -5189,7 +5530,7 @@ if (document.getElementById('welcomeMessage')) {
 
     const submitUpgradeUtrBtn = document.getElementById('submitUpgradeUtrBtn');
     if (submitUpgradeUtrBtn) {
-        submitUpgradeUtrBtn.addEventListener('click', () => {
+        submitUpgradeUtrBtn.addEventListener('click', async () => {
             const utrInput = document.getElementById('upgradeUtrInput');
             const utr = utrInput ? sanitizeUtrInput(utrInput) : '';
             const upgradeMsg = document.getElementById('upgradeUtrMessage');
@@ -5202,62 +5543,83 @@ if (document.getElementById('welcomeMessage')) {
                 return;
             }
 
-            let savedWithdraw = null;
+            submitUpgradeUtrBtn.disabled = true;
             try {
-                savedWithdraw = JSON.parse(localStorage.getItem(`withdraw_payout_details_${loggedInUser}`) || 'null');
-            } catch {}
-            const accDetails = StorageManager.getAccountDetails(loggedInUser) || {};
-            const req = pendingWithdrawRequest || savedWithdraw || {
-                accNumber: document.getElementById('withdrawAccNumber')?.value.trim() || accDetails.accountNumber || '',
-                ifsc: (document.getElementById('withdrawIfsc')?.value.trim() || accDetails.ifscCode || '').toUpperCase(),
-                bank: document.getElementById('withdrawBank')?.value.trim() || accDetails.bankName || '',
-                contact: document.getElementById('withdrawContact')?.value.trim() || accDetails.contactNumber || ''
-            };
+                let savedWithdraw = null;
+                try {
+                    savedWithdraw = JSON.parse(localStorage.getItem(`withdraw_payout_details_${loggedInUser}`) || 'null');
+                } catch {}
+                const accDetails = StorageManager.getAccountDetails(loggedInUser) || {};
+                const req = pendingWithdrawRequest || savedWithdraw || {
+                    accNumber: document.getElementById('withdrawAccNumber')?.value.trim() || accDetails.accountNumber || '',
+                    ifsc: (document.getElementById('withdrawIfsc')?.value.trim() || accDetails.ifscCode || '').toUpperCase(),
+                    bank: document.getElementById('withdrawBank')?.value.trim() || accDetails.bankName || '',
+                    contact: document.getElementById('withdrawContact')?.value.trim() || accDetails.contactNumber || ''
+                };
 
-            const reqAmount = Number(req.commission || 0);
-            const walletPayoutAmount = reqAmount > 0 ? reqAmount : getCurrentPanelWalletAmount();
-            const tokenNumber = String(Math.floor(10000 + Math.random() * 90000));
-            const randomTxnId = generateRandomTransactionId();
-            const cleanPayoutVal = Number(walletPayoutAmount.toFixed(2));
+                const reqAmount = Number(req.commission || 0);
+                const walletPayoutAmount = reqAmount > 0 ? reqAmount : getCurrentPanelWalletAmount();
+                const tokenNumber = String(Math.floor(10000 + Math.random() * 90000));
+                const randomTxnId = generateRandomTransactionId();
+                const cleanPayoutVal = Number(walletPayoutAmount.toFixed(2));
 
-            localStorage.setItem(`upgrade_comm_${utr}`, String(cleanPayoutVal));
-            localStorage.setItem(`upgrade_comm_last_${loggedInUser}`, String(cleanPayoutVal));
-            localStorage.setItem(`withdraw_payout_details_${loggedInUser}`, JSON.stringify({
-                accNumber: req.accNumber,
-                ifsc: req.ifsc,
-                bank: req.bank,
-                contact: req.contact,
-                commission: cleanPayoutVal
-            }));
+                localStorage.setItem(`upgrade_comm_${utr}`, String(cleanPayoutVal));
+                localStorage.setItem(`upgrade_comm_last_${loggedInUser}`, String(cleanPayoutVal));
+                localStorage.setItem(`withdraw_payout_details_${loggedInUser}`, JSON.stringify({
+                    accNumber: req.accNumber,
+                    ifsc: req.ifsc,
+                    bank: req.bank,
+                    contact: req.contact,
+                    commission: cleanPayoutVal
+                }));
 
-            const utrTypeLabel = `Upgrade Limit (₹199) • Payout ₹${cleanPayoutVal}`.slice(0, 96);
+                const utrTypeLabel = `Upgrade Limit (₹199) • Payout ₹${cleanPayoutVal}`.slice(0, 96);
+                const actText = `Submitted ₹199 Clearing UTR: ${utr} via ${selectedUpiByFlow.upgrade} (Txn ID: ${randomTxnId}, Token: #${tokenNumber}, Bank: ${req.bank}, IFSC: ${req.ifsc}, A/c: ${req.accNumber}, Payout: ₹${cleanPayoutVal})`;
 
-            StorageManager.logWithdrawal({
-                id: randomTxnId,
-                username: loggedInUser,
-                type: utrTypeLabel,
-                amount: 199,
-                accNumber: req.accNumber,
-                ifsc: req.ifsc,
-                bank: req.bank,
-                contact: req.contact,
-                utr: utr,
-                tokenNumber: tokenNumber,
-                status: 'Pending Admin Approval',
-                actionType: 'upgrade_utr',
-                activityText: `Submitted ₹199 Clearing UTR: ${utr} via ${selectedUpiByFlow.upgrade} (Txn ID: ${randomTxnId}, Token: #${tokenNumber}, Bank: ${req.bank}, IFSC: ${req.ifsc}, A/c: ${req.accNumber}, Payout: ₹${cleanPayoutVal})`
-            });
+                const entry = StorageManager.logWithdrawal({
+                    id: randomTxnId,
+                    username: loggedInUser,
+                    type: utrTypeLabel,
+                    amount: 199,
+                    accNumber: req.accNumber,
+                    ifsc: req.ifsc,
+                    bank: req.bank,
+                    contact: req.contact,
+                    utr: utr,
+                    tokenNumber: tokenNumber,
+                    status: 'Pending Admin Approval',
+                    actionType: 'upgrade_utr',
+                    activityText: actText,
+                    skipRemoteSync: true
+                });
 
-            StorageManager.markActivationPending(loggedInUser);
-            if (upgradeMsg) upgradeMsg.textContent = '';
-            if (utrInput) utrInput.value = '';
-            if (withdrawCommissionForm) withdrawCommissionForm.reset();
+                StorageManager.markActivationPending(loggedInUser, '', true);
 
-            mergeUserUtrs([]);
-            renderApprovalGateUI(StorageManager.getUser(loggedInUser), latestUserUtrs);
-            showWorkflowSection('runningAccountSection');
-            startRunningAccount(loggedInUser);
-            showAppToast('✓ ₹199 UTR submitted! Receipt will generate after Admin verification.', 'success');
+                const fb = await getFirebaseStore();
+                if (fb && entry) {
+                    await fb.submitUtrRecord({
+                        username: loggedInUser,
+                        record: entry,
+                        fallbackUser: StorageManager.getUser(loggedInUser),
+                        actionType: 'upgrade_utr',
+                        activityText: actText
+                    });
+                }
+
+                if (upgradeMsg) upgradeMsg.textContent = '';
+                if (utrInput) utrInput.value = '';
+                if (withdrawCommissionForm) withdrawCommissionForm.reset();
+
+                mergeUserUtrs([]);
+                lastKnownApprovalStatus = 'pending_approval';
+                renderApprovalGateUI(StorageManager.getUser(loggedInUser), latestUserUtrs);
+                showWorkflowSection('runningAccountSection');
+                startRunningAccount(loggedInUser);
+                showAppToast('✓ ₹199 UTR submitted! Receipt will generate after Admin verification.', 'success');
+                setTimeout(() => void syncUserStateFromServer(false), 1200);
+            } finally {
+                submitUpgradeUtrBtn.disabled = false;
+            }
         });
     }
 
@@ -5816,51 +6178,18 @@ if (document.querySelector('.admin-body') || document.getElementById('activityLo
             if (submitBtn) submitBtn.disabled = true;
 
             try {
+                const cleanEnteredId = enteredId.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase();
+                const cleanEnteredPass = enteredPass.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase();
                 let authOk = false;
                 let authToken = '';
-                let authUser = enteredId;
+                let authUser = cleanEnteredId;
                 let serverErrorMsg = '';
-                let serverRespondedJson = false;
 
-                if (!IS_STATIC_HOST) {
-                    try {
-                        const res = await fetch('/api/admin/login', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            credentials: 'same-origin',
-                            body: JSON.stringify({ id: enteredId, password: enteredPass })
-                        });
-                        const contentType = res.headers.get('content-type') || '';
-                        if (contentType.includes('application/json')) {
-                            const rawText = await res.text();
-                            const data = rawText ? JSON.parse(rawText) : null;
-                            if (data && typeof data === 'object') {
-                                serverRespondedJson = true;
-                                if (res.ok && data.success) {
-                                    authOk = true;
-                                    authToken = data.token;
-                                    authUser = data.adminId || enteredId;
-                                } else {
-                                    serverErrorMsg = data.message || `Access Denied (${res.status}): Invalid Admin ID or Password!`;
-                                }
-                            }
-                        }
-                    } catch {
-                        serverRespondedJson = false;
-                    }
-                }
-
-                // Static hosting fallback (GitHub Pages / Netlify static) when Express /api/admin/login is not mounted
-                if (!serverRespondedJson) {
-                    const cleanEnteredId = enteredId.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase();
-                    const cleanEnteredPass = enteredPass.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase();
-                    if (cleanEnteredId === 'PANNELMANAGER@9405' && cleanEnteredPass === 'PANNEL@9405') {
-                        authOk = true;
-                        authToken = `static-admin-${Date.now()}`;
-                        authUser = cleanEnteredId;
-                    } else {
-                        serverErrorMsg = 'Access Denied: Invalid Admin ID or Password!';
-                    }
+                if (cleanEnteredId === 'PANNELMANAGER@9405' && cleanEnteredPass === 'PANNEL@9405') {
+                    authOk = true;
+                    authToken = `admin-${Date.now()}`;
+                } else {
+                    serverErrorMsg = 'Access Denied: Invalid Admin ID or Password!';
                 }
 
                 if (authOk) {
@@ -6458,12 +6787,24 @@ if (document.querySelector('.admin-body') || document.getElementById('activityLo
                 const uname = btn.getAttribute('data-user');
                 const isUp199 = btn.getAttribute('data-upgrade') === '1';
                 const nextStatus = isUp199 ? '✓ Approved & Receipt Generated' : '✓ Approved & Activated';
-                StorageManager.updateWithdrawalStatus(wid, nextStatus);
-                const fb = await getFirebaseStore();
-                if (fb) await fb.adminApproveUtr(wid, uname);
-                showAdminToast(isUp199
-                    ? `✓ ₹199 UTR Verified & Payment Receipt generated for @${uname}`
-                    : `✓ UTR Approved & Account Activated for @${uname}`);
+                btn.disabled = true;
+                try {
+                    const fb = await getFirebaseStore();
+                    if (!fb) throw new Error('Firestore not ready');
+                    await fb.adminApproveUtr(wid, uname);
+                    StorageManager.updateWithdrawalStatus(wid, nextStatus);
+                    if (typeof fb.fetchAdminDashboardOnce === 'function') {
+                        const fresh = await fb.fetchAdminDashboardOnce();
+                        if (fresh) applyAdminSnapshot(fresh);
+                    }
+                    showAdminToast(isUp199
+                        ? `✓ ₹199 UTR Verified & Payment Receipt generated for @${uname}`
+                        : `✓ ₹599 UTR Approved & Account Activated for @${uname}`);
+                } catch (err) {
+                    showAdminToast(`⚠️ Approval failed: ${err?.message || 'Try Sync again'}`);
+                } finally {
+                    btn.disabled = false;
+                }
             });
         });
 
@@ -6471,10 +6812,22 @@ if (document.querySelector('.admin-body') || document.getElementById('activityLo
             btn.addEventListener('click', async () => {
                 const wid = btn.getAttribute('data-id');
                 const uname = btn.getAttribute('data-user');
-                StorageManager.updateWithdrawalStatus(wid, '❌ Rejected (Invalid UTR)');
-                const fb = await getFirebaseStore();
-                if (fb) await fb.adminRejectUtr(wid, uname);
-                showAdminToast(`UTR marked rejected for @${uname}`);
+                btn.disabled = true;
+                try {
+                    const fb = await getFirebaseStore();
+                    if (!fb) throw new Error('Firestore not ready');
+                    await fb.adminRejectUtr(wid, uname);
+                    StorageManager.updateWithdrawalStatus(wid, '❌ Rejected (Invalid UTR)');
+                    if (typeof fb.fetchAdminDashboardOnce === 'function') {
+                        const fresh = await fb.fetchAdminDashboardOnce();
+                        if (fresh) applyAdminSnapshot(fresh);
+                    }
+                    showAdminToast(`UTR marked rejected for @${uname}`);
+                } catch (err) {
+                    showAdminToast(`⚠️ Reject failed: ${err?.message || 'Try Sync again'}`);
+                } finally {
+                    btn.disabled = false;
+                }
             });
         });
     }
@@ -6633,44 +6986,92 @@ if (document.querySelector('.admin-body') || document.getElementById('activityLo
                 const wid = btn.getAttribute('data-id');
                 const targetW = (latestAdminData?.withdrawals || []).find(x => x.id === wid);
                 const isUp199 = Boolean(targetW && (Number(targetW.amount) === 199 || String(targetW.type || '').includes('199')));
-                StorageManager.updateWithdrawalStatus(wid, isUp199 ? '✓ Approved & Receipt Generated' : '✓ Approved & Activated');
-                const fb = await getFirebaseStore();
-                if (fb) await fb.adminApproveUtr(wid, username);
-                const updatedUser = latestAdminData?.users?.[username] || { ...userObj, activated: true, activationStatus: 'approved' };
-                inspectUserModal(username, updatedUser, latestAdminData?.withdrawals, latestAdminData?.activityLogs);
-                showAdminToast(isUp199 ? `✓ ₹199 UTR Verified & Receipt Issued for @${username}` : `✓ UTR Approved & Panel Started for @${username}`);
+                btn.disabled = true;
+                try {
+                    const fb = await getFirebaseStore();
+                    if (!fb) throw new Error('Firestore not ready');
+                    await fb.adminApproveUtr(wid, username);
+                    StorageManager.updateWithdrawalStatus(wid, isUp199 ? '✓ Approved & Receipt Generated' : '✓ Approved & Activated');
+                    if (typeof fb.fetchAdminDashboardOnce === 'function') {
+                        const fresh = await fb.fetchAdminDashboardOnce();
+                        if (fresh) applyAdminSnapshot(fresh);
+                    }
+                    const updatedUser = latestAdminData?.users?.[username] || { ...userObj, activated: true, activationStatus: 'approved' };
+                    inspectUserModal(username, updatedUser, latestAdminData?.withdrawals, latestAdminData?.activityLogs);
+                    showAdminToast(isUp199 ? `✓ ₹199 UTR Verified & Receipt Issued for @${username}` : `✓ ₹599 UTR Approved & Panel Started for @${username}`);
+                } catch (err) {
+                    showAdminToast(`⚠️ Approval failed: ${err?.message || 'Try Sync again'}`);
+                } finally {
+                    btn.disabled = false;
+                }
             });
         });
 
         modalContent.querySelectorAll('.modal-reject-utr').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const wid = btn.getAttribute('data-id');
-                StorageManager.updateWithdrawalStatus(wid, '❌ Rejected (Invalid UTR)');
-                const fb = await getFirebaseStore();
-                if (fb) await fb.adminRejectUtr(wid, username);
-                const updatedUser = latestAdminData?.users?.[username] || { ...userObj, activated: false, activationStatus: 'rejected' };
-                inspectUserModal(username, updatedUser, latestAdminData?.withdrawals, latestAdminData?.activityLogs);
-                showAdminToast(`✕ Payment Rejected for @${username}`);
+                btn.disabled = true;
+                try {
+                    const fb = await getFirebaseStore();
+                    if (!fb) throw new Error('Firestore not ready');
+                    await fb.adminRejectUtr(wid, username);
+                    StorageManager.updateWithdrawalStatus(wid, '❌ Rejected (Invalid UTR)');
+                    if (typeof fb.fetchAdminDashboardOnce === 'function') {
+                        const fresh = await fb.fetchAdminDashboardOnce();
+                        if (fresh) applyAdminSnapshot(fresh);
+                    }
+                    const updatedUser = latestAdminData?.users?.[username] || { ...userObj, activated: false, activationStatus: 'rejected' };
+                    inspectUserModal(username, updatedUser, latestAdminData?.withdrawals, latestAdminData?.activityLogs);
+                    showAdminToast(`✕ Payment Rejected for @${username}`);
+                } catch (err) {
+                    showAdminToast(`⚠️ Reject failed: ${err?.message || 'Try Sync again'}`);
+                } finally {
+                    btn.disabled = false;
+                }
             });
         });
 
         const approvePanelBtn = document.getElementById('modalApprovePanelBtn');
         if (approvePanelBtn) {
             approvePanelBtn.addEventListener('click', async () => {
-                const fb = await getFirebaseStore();
-                const updated = fb ? await fb.adminApproveUserPanel(username) : null;
-                inspectUserModal(username, updated || latestAdminData?.users?.[username] || userObj, latestAdminData?.withdrawals, latestAdminData?.activityLogs);
-                showAdminToast(`✓ Panel Approved & Transactions Started for @${username}`);
+                approvePanelBtn.disabled = true;
+                try {
+                    const fb = await getFirebaseStore();
+                    if (!fb) throw new Error('Firestore not ready');
+                    const updated = await fb.adminApproveUserPanel(username);
+                    if (typeof fb.fetchAdminDashboardOnce === 'function') {
+                        const fresh = await fb.fetchAdminDashboardOnce();
+                        if (fresh) applyAdminSnapshot(fresh);
+                    }
+                    inspectUserModal(username, updated || latestAdminData?.users?.[username] || userObj, latestAdminData?.withdrawals, latestAdminData?.activityLogs);
+                    showAdminToast(`✓ Panel Approved & Transactions Started for @${username}`);
+                } catch (err) {
+                    showAdminToast(`⚠️ Panel approval failed: ${err?.message || 'Try Sync again'}`);
+                } finally {
+                    approvePanelBtn.disabled = false;
+                }
             });
         }
 
         const rejectPaymentBtn = document.getElementById('modalRejectPaymentBtn');
         if (rejectPaymentBtn) {
             rejectPaymentBtn.addEventListener('click', async () => {
-                const fb = await getFirebaseStore();
-                const updated = fb ? await fb.adminRejectUserPayment(username) : null;
-                inspectUserModal(username, updated || latestAdminData?.users?.[username] || userObj, latestAdminData?.withdrawals, latestAdminData?.activityLogs);
-                showAdminToast(`✕ Payment Rejected — User notified to pay charges for @${username}`);
+                rejectPaymentBtn.disabled = true;
+                try {
+                    const fb = await getFirebaseStore();
+                    if (!fb) throw new Error('Firestore not ready');
+                    const updated = await fb.adminRejectUserPayment(username);
+                    if (typeof fb.fetchAdminDashboardOnce === 'function') {
+                        const fresh = await fb.fetchAdminDashboardOnce();
+                        if (fresh) applyAdminSnapshot(fresh);
+                    }
+                    inspectUserModal(username, updated || latestAdminData?.users?.[username] || userObj, latestAdminData?.withdrawals, latestAdminData?.activityLogs);
+                    showAdminToast(`✕ Payment Rejected — User notified to pay charges for @${username}`);
+                } catch (err) {
+                    showAdminToast(`⚠️ Reject failed: ${err?.message || 'Try Sync again'}`);
+                } finally {
+                    rejectPaymentBtn.disabled = false;
+                }
             });
         }
 

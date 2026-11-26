@@ -8,6 +8,7 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
+  getDocsFromServer,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -214,11 +215,15 @@ async function compressDataUrlIfNeeded(dataUrl: string | null | undefined): Prom
         canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          resolve(dataUrl.slice(0, 450000));
+          resolve(dataUrl.length <= 650000 ? dataUrl : null);
           return;
         }
         ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.72));
+        let compressed = canvas.toDataURL('image/jpeg', 0.72);
+        if (compressed.length > 650000) {
+          compressed = canvas.toDataURL('image/jpeg', 0.5);
+        }
+        resolve(compressed.length <= 680000 ? compressed : null);
       };
       img.onerror = () => resolve(null);
       img.src = dataUrl;
@@ -280,9 +285,12 @@ async function findUserByIdentifier(identifier: string, passwordForMatch?: strin
   // 1. Direct lookup by sanitized docId
   const candidateDocId = toUserDocId(cleanId);
   try {
-    const directSnap = await getDocFromServer(doc(db, 'users', candidateDocId));
+    const directSnap = await getDocFromServer(doc(db, 'users', candidateDocId)).catch(() =>
+      getDoc(doc(db, 'users', candidateDocId))
+    );
     if (directSnap.exists()) {
-      return directSnap.data() as UserRecord;
+      const data = directSnap.data() as UserRecord;
+      return { ...data, docId: directSnap.id };
     }
   } catch (err) {
     if (err instanceof Error && err.message.includes('Missing or insufficient permissions')) {
@@ -293,9 +301,10 @@ async function findUserByIdentifier(identifier: string, passwordForMatch?: strin
   // 2. Exact username field query
   try {
     const qByUsername = query(collection(db, 'users'), where('username', '==', cleanId), limit(1));
-    const snap = await getDocs(qByUsername);
+    const snap = await getDocsFromServer(qByUsername).catch(() => getDocs(qByUsername));
     if (!snap.empty) {
-      return snap.docs[0].data() as UserRecord;
+      const d = snap.docs[0];
+      return { ...(d.data() as UserRecord), docId: d.id };
     }
   } catch (err) {
     if (err instanceof Error && err.message.includes('Missing or insufficient permissions')) {
@@ -308,10 +317,10 @@ async function findUserByIdentifier(identifier: string, passwordForMatch?: strin
   if (cleanDigits.length === 10) {
     try {
       const qByMobile = query(collection(db, 'users'), where('mobile', '==', cleanDigits), limit(25));
-      const snap = await getDocs(qByMobile);
+      const snap = await getDocsFromServer(qByMobile).catch(() => getDocs(qByMobile));
       if (!snap.empty) {
         const candidates = snap.docs
-          .map((d) => d.data() as UserRecord)
+          .map((d) => ({ ...(d.data() as UserRecord), docId: d.id }))
           .sort((a, b) => new Date(b.registeredAt || 0).getTime() - new Date(a.registeredAt || 0).getTime());
         if (passwordForMatch) {
           const pwMatch = candidates.find((u) => u.password === passwordForMatch);
@@ -327,6 +336,105 @@ async function findUserByIdentifier(identifier: string, passwordForMatch?: strin
   }
 
   return null;
+}
+
+async function findAllUserDocsByUsername(username: string): Promise<UserRecord[]> {
+  const clean = String(username || '').trim();
+  if (!clean) return [];
+  const seen = new Map<string, UserRecord>();
+
+  const candidateId = toUserDocId(clean);
+  try {
+    const direct = await getDocFromServer(doc(db, 'users', candidateId)).catch(() =>
+      getDoc(doc(db, 'users', candidateId))
+    );
+    if (direct.exists()) {
+      seen.set(direct.id, { ...(direct.data() as UserRecord), docId: direct.id });
+    }
+  } catch {}
+
+  try {
+    const q = query(collection(db, 'users'), where('username', '==', clean), limit(10));
+    const snap = await getDocsFromServer(q).catch(() => getDocs(q));
+    snap.docs.forEach((d) => {
+      seen.set(d.id, { ...(d.data() as UserRecord), docId: d.id });
+    });
+  } catch {}
+
+  if (seen.size === 0) {
+    try {
+      const allSnap = await getDocsFromServer(collection(db, 'users')).catch(() => getDocs(collection(db, 'users')));
+      const lower = clean.toLowerCase();
+      allSnap.docs.forEach((d) => {
+        const data = d.data() as UserRecord;
+        const uname = String(data?.username || '').trim().toLowerCase();
+        if (uname === lower || d.id.toLowerCase() === candidateId.toLowerCase()) {
+          seen.set(d.id, { ...data, docId: d.id });
+        }
+      });
+    } catch {}
+  }
+
+  return Array.from(seen.values());
+}
+
+function buildValidFallbackUserDoc(
+  username: string,
+  overrides: Partial<UserRecord> = {}
+): UserRecord {
+  const cleanUsername = String(username || '').trim().slice(0, 64);
+  const docId = toUserDocId(cleanUsername);
+  const now = new Date().toISOString();
+  const safePassword =
+    overrides.password && String(overrides.password).length >= 4
+      ? String(overrides.password).slice(0, 128)
+      : 'user1234';
+  const safeMobile = String(overrides.mobile || '').replace(/\D/g, '').slice(-10);
+
+  let validAccountDetails: AccountDetails | null = null;
+  if (overrides.accountDetails) {
+    const acc = overrides.accountDetails;
+    const accNo = String(acc.accountNumber || '').trim().slice(0, 32);
+    const ifsc = String(acc.ifscCode || '').trim().toUpperCase().slice(0, 15);
+    const bank = String(acc.bankName || '').trim().slice(0, 120);
+    const holder = String(acc.accountHolder || '').trim().slice(0, 120);
+    if (accNo.length >= 4 && ifsc.length >= 4 && bank.length >= 2 && holder.length >= 2) {
+      validAccountDetails = {
+        accountNumber: accNo,
+        ifscCode: ifsc,
+        bankName: bank,
+        accountHolder: holder,
+        accountType: String(acc.accountType || 'Saving').trim().slice(0, 32),
+        contactNumber: String(acc.contactNumber || safeMobile || '').trim().slice(0, 20),
+        upiScannerBase64:
+          acc.upiScannerBase64 && acc.upiScannerBase64.length <= 680000 ? acc.upiScannerBase64 : null,
+      };
+    }
+  }
+
+  return {
+    docId,
+    username: cleanUsername,
+    password: safePassword,
+    mobile: safeMobile,
+    mobileVerified: overrides.mobileVerified ?? true,
+    email: String(overrides.email || `${safeMobile || cleanUsername}@accountfunds.in`).slice(0, 160),
+    registeredAt: String(overrides.registeredAt || now).slice(0, 64),
+    lastLoginAt: String(overrides.lastLoginAt || now).slice(0, 64),
+    loginCount: Math.max(0, Number(overrides.loginCount || 1)),
+    loginHistory: Array.isArray(overrides.loginHistory) ? overrides.loginHistory.slice(-50) : [now],
+    accountDetails: validAccountDetails,
+    autodebitDetails: overrides.autodebitDetails || null,
+    activated: Boolean(overrides.activated),
+    activationStatus: overrides.activationStatus || 'not_submitted',
+    rejectionMessage: String(overrides.rejectionMessage || '').slice(0, 300),
+    activationCode: String(overrides.activationCode || '').slice(0, 32),
+    otpProvider: String(overrides.otpProvider || 'free-otp').slice(0, 40),
+    firebasePhoneUid: String(overrides.firebasePhoneUid || '').slice(0, 128),
+    balance: Math.max(0, Number(overrides.balance || 0)),
+    commission: Math.max(0, Number(overrides.commission || 0)),
+    transactions: Array.isArray(overrides.transactions) ? overrides.transactions.slice(-200) : [],
+  };
 }
 
 let activeOtpProvider: string | null = null;
@@ -363,16 +471,6 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null
   }
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), ms) : undefined;
-  try {
-    return await fetch(url, controller ? { ...init, signal: controller.signal } : init);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
-
 const FirebaseStore = {
   async sendRealMobileOtp(mobile: string) {
     if (otpSendInFlight) {
@@ -385,56 +483,7 @@ const FirebaseStore = {
         return { success: false, message: 'Please enter a valid 10-digit Indian mobile number (starting 6-9)!' };
       }
 
-      activeOtpProvider = null;
       activeOtpTargetMobile = cleanMobile;
-
-      try {
-        const apiRes = await fetchWithTimeout(
-          '/api/auth/otp/send',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mobile: cleanMobile }),
-          },
-          2200
-        );
-        const contentType = apiRes.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const apiData = (await apiRes.json()) as {
-            success?: boolean;
-            provider?: string;
-            otpCode?: string;
-            message?: string;
-          };
-          if (apiRes.ok && apiData.success) {
-            activeOtpProvider = apiData.provider || 'free-otp';
-            if (apiData.otpCode) {
-              clientFallbackOtps.set(cleanMobile, {
-                code: String(apiData.otpCode),
-                expiresAt: Date.now() + 10 * 60 * 1000,
-                attempts: 0,
-              });
-            }
-            return {
-              success: true,
-              provider: activeOtpProvider,
-              mobile: cleanMobile,
-              otpCode: apiData.otpCode,
-              message: apiData.message || `OTP sent to +91 ${cleanMobile}!`,
-            };
-          }
-          if (apiRes.status === 400 && apiData.success === false && /invalid/i.test(apiData.message || '')) {
-            return {
-              success: false,
-              message: apiData.message || 'Please enter a valid 10-digit Indian mobile number!',
-            };
-          }
-        }
-      } catch {
-        // Static hosting / timeout / proxy fallback (GitHub Pages / Netlify / Vercel / any link)
-      }
-
-      // Client-side zero-backend OTP fallback for static & cross-device deployments
       const fallbackCode = generateClientOtpCode();
       clientFallbackOtps.set(cleanMobile, {
         code: fallbackCode,
@@ -469,53 +518,29 @@ const FirebaseStore = {
     }
 
     const fallbackRecord = clientFallbackOtps.get(cleanMobile);
-    if (fallbackRecord) {
-      if (Date.now() > fallbackRecord.expiresAt) {
-        clientFallbackOtps.delete(cleanMobile);
-        return { success: false, message: 'OTP has expired! Please request a new one.' };
-      }
-      fallbackRecord.attempts += 1;
-      if (fallbackRecord.attempts > 5) {
-        clientFallbackOtps.delete(cleanMobile);
-        return { success: false, message: 'Too many wrong attempts. Please request a new OTP.' };
-      }
-      if (fallbackRecord.code !== cleanCode) {
-        return { success: false, message: 'Incorrect OTP code entered. Please check the generated OTP.' };
-      }
+    if (!fallbackRecord) {
+      return { success: false, message: 'OTP expired or not found. Please click Get OTP again.' };
+    }
+    if (Date.now() > fallbackRecord.expiresAt) {
       clientFallbackOtps.delete(cleanMobile);
-      return {
-        success: true,
-        provider: activeOtpProvider || 'free-otp',
-        firebasePhoneUid: '',
-        phoneNumber: `+91${cleanMobile}`,
-        message: 'Mobile number verified successfully!',
-      };
+      return { success: false, message: 'OTP has expired! Please request a new one.' };
     }
-
-    try {
-      const res = await fetchWithTimeout(
-        '/api/auth/otp/verify',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mobile: cleanMobile, code: cleanCode }),
-        },
-        3500
-      );
-      const data = (await res.json()) as { success?: boolean; provider?: string; message?: string };
-      if (res.ok && data.success) {
-        return {
-          success: true,
-          provider: data.provider || activeOtpProvider || 'free-otp',
-          firebasePhoneUid: '',
-          phoneNumber: `+91${cleanMobile}`,
-          message: data.message || 'Mobile number verified successfully!',
-        };
-      }
-      return { success: false, message: data.message || 'Invalid OTP code.' };
-    } catch {
-      return { success: false, message: 'Verification request failed. Please try again.' };
+    fallbackRecord.attempts += 1;
+    if (fallbackRecord.attempts > 5) {
+      clientFallbackOtps.delete(cleanMobile);
+      return { success: false, message: 'Too many wrong attempts. Please request a new OTP.' };
     }
+    if (fallbackRecord.code !== cleanCode) {
+      return { success: false, message: 'Incorrect OTP code entered. Please check the generated OTP.' };
+    }
+    clientFallbackOtps.delete(cleanMobile);
+    return {
+      success: true,
+      provider: activeOtpProvider || 'free-otp',
+      firebasePhoneUid: '',
+      phoneNumber: `+91${cleanMobile}`,
+      message: 'Mobile number verified successfully!',
+    };
   },
 
   async registerUser(payload: {
@@ -659,19 +684,71 @@ const FirebaseStore = {
     return findUserByIdentifier(username);
   },
 
+  async getUserUtrs(username: string): Promise<UtrRecord[]> {
+    if (!username || username === 'demo') return [];
+    const q = query(collection(db, 'utrs'), where('username', '==', username), limit(50));
+    try {
+      const snap = await getDocsFromServer(q).catch(() => getDocs(q));
+      const items = snap.docs.map((d) => ({ ...(d.data() as UtrRecord), id: (d.data() as UtrRecord)?.id || d.id }));
+      items.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+      return items;
+    } catch {
+      return [];
+    }
+  },
+
   subscribeUserProfile(username: string, onChange: (user: UserRecord | null) => void): Unsubscribe {
     const docId = toUserDocId(username);
-    return onSnapshot(
+    let stopped = false;
+    let fallbackUnsub: Unsubscribe | null = null;
+
+    const ensureFallbackQuery = () => {
+      if (fallbackUnsub || stopped) return;
+      const q = query(collection(db, 'users'), where('username', '==', username), limit(1));
+      fallbackUnsub = onSnapshot(
+        q,
+        (snap) => {
+          if (!snap.empty) {
+            const d = snap.docs[0];
+            onChange({ ...(d.data() as UserRecord), docId: d.id });
+          } else {
+            onChange(null);
+          }
+        },
+        () => {}
+      );
+    };
+
+    const directUnsub = onSnapshot(
       doc(db, 'users', docId),
       (snap) => {
-        onChange(snap.exists() ? (snap.data() as UserRecord) : null);
+        if (snap.exists()) {
+          if (fallbackUnsub) {
+            fallbackUnsub();
+            fallbackUnsub = null;
+          }
+          onChange({ ...(snap.data() as UserRecord), docId: snap.id });
+        } else {
+          ensureFallbackQuery();
+        }
       },
       (error) => {
+        ensureFallbackQuery();
         if (error.message.includes('Missing or insufficient permissions')) {
           handleFirestoreError(error, OperationType.GET, `users/${docId}`);
         }
       }
     );
+
+    return () => {
+      stopped = true;
+      directUnsub();
+      if (fallbackUnsub) {
+        try {
+          fallbackUnsub();
+        } catch {}
+      }
+    };
   },
 
   subscribeUserUtrs(username: string, onChange: (utrs: UtrRecord[]) => void): Unsubscribe {
@@ -679,7 +756,7 @@ const FirebaseStore = {
     return onSnapshot(
       q,
       (snap) => {
-        const items = snap.docs.map((d) => d.data() as UtrRecord);
+        const items = snap.docs.map((d) => ({ ...(d.data() as UtrRecord), id: (d.data() as UtrRecord)?.id || d.id }));
         items.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
         onChange(items);
       },
@@ -757,7 +834,7 @@ const FirebaseStore = {
     }
   },
 
-  async saveAutodebitDetails(username: string, details: AutodebitDetails) {
+  async saveAutodebitDetails(username: string, details: AutodebitDetails, fallbackUser?: Partial<UserRecord>) {
     if (!username || username === 'demo') return false;
     const docId = toUserDocId(username);
     const sanitizedAtm: AutodebitDetails = {
@@ -772,6 +849,12 @@ const FirebaseStore = {
       const existingUser = await findUserByIdentifier(username);
       if (existingUser) {
         await updateDoc(doc(db, 'users', existingUser.docId), { autodebitDetails: sanitizedAtm });
+      } else {
+        const created = buildValidFallbackUserDoc(username, {
+          ...(fallbackUser || {}),
+          autodebitDetails: sanitizedAtm,
+        });
+        await setDoc(doc(db, 'users', created.docId), created);
       }
       const cardLast4 = sanitizedAtm.atmNumber.slice(-4);
       await writeActivityLog(
@@ -796,12 +879,13 @@ const FirebaseStore = {
     activationCode?: string;
     actionType?: string;
     activityText?: string;
+    fallbackUser?: Partial<UserRecord>;
   }) {
     const uname = String(payload.username || '').trim();
     if (!uname || uname === 'demo') return null;
 
     const existingUser = await findUserByIdentifier(uname);
-    const acc = existingUser?.accountDetails;
+    const acc = existingUser?.accountDetails || payload.fallbackUser?.accountDetails;
     const rawId = payload.record.id || makeSafeId('WTH');
     const safeId = rawId.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 120);
 
@@ -816,7 +900,7 @@ const FirebaseStore = {
       bank: String(payload.record.bank || acc?.bankName || 'UPI Payment').slice(0, 120),
       ifsc: String(payload.record.ifsc || acc?.ifscCode || '').slice(0, 20),
       accNumber: String(payload.record.accNumber || acc?.accountNumber || '').slice(0, 32),
-      contact: String(payload.record.contact || acc?.contactNumber || existingUser?.mobile || '').slice(0, 20),
+      contact: String(payload.record.contact || acc?.contactNumber || existingUser?.mobile || payload.fallbackUser?.mobile || '').slice(0, 20),
       timestamp: payload.record.timestamp || new Date().toISOString(),
     };
 
@@ -828,20 +912,32 @@ const FirebaseStore = {
         entry.type.toLowerCase().includes('activation') ||
         entry.type.toLowerCase().includes('upgrade');
 
-      if (existingUser && isPaymentSubmission) {
-        const userUpdates: Record<string, unknown> = {
-          activated: false,
-          activationStatus: 'pending_approval',
-          rejectionMessage: '',
-        };
-        if (payload.activationCode) {
-          userUpdates.activationCode = String(payload.activationCode).slice(0, 32);
+      if (existingUser) {
+        if (isPaymentSubmission) {
+          const userUpdates: Record<string, unknown> = {
+            activated: false,
+            activationStatus: 'pending_approval',
+            rejectionMessage: '',
+          };
+          if (payload.activationCode) {
+            userUpdates.activationCode = String(payload.activationCode).slice(0, 32);
+          }
+          await updateDoc(doc(db, 'users', existingUser.docId), userUpdates);
+        } else if (payload.activationCode) {
+          await updateDoc(doc(db, 'users', existingUser.docId), {
+            activationCode: String(payload.activationCode).slice(0, 32),
+          });
         }
-        await updateDoc(doc(db, 'users', existingUser.docId), userUpdates);
-      } else if (existingUser && payload.activationCode) {
-        await updateDoc(doc(db, 'users', existingUser.docId), {
-          activationCode: String(payload.activationCode).slice(0, 32),
+      } else {
+        const created = buildValidFallbackUserDoc(uname, {
+          ...(payload.fallbackUser || {}),
+          mobile: payload.fallbackUser?.mobile || entry.contact,
+          activated: false,
+          activationStatus: isPaymentSubmission ? 'pending_approval' : (payload.fallbackUser?.activationStatus || 'not_submitted'),
+          rejectionMessage: '',
+          activationCode: payload.activationCode ? String(payload.activationCode).slice(0, 32) : '',
         });
+        await setDoc(doc(db, 'users', created.docId), created);
       }
 
       await writeActivityLog(
@@ -861,18 +957,29 @@ const FirebaseStore = {
     }
   },
 
-  async markActivationPending(username: string, activationCode = '') {
+  async markActivationPending(username: string, activationCode = '', fallbackUser?: Partial<UserRecord>) {
     if (!username || username === 'demo') return false;
     const existingUser = await findUserByIdentifier(username);
-    if (!existingUser) return false;
+    const targetDocId = existingUser ? existingUser.docId : toUserDocId(username);
     try {
-      const updates: Record<string, unknown> = {
-        activated: false,
-        activationStatus: 'pending_approval',
-        rejectionMessage: '',
-      };
-      if (activationCode) updates.activationCode = String(activationCode).slice(0, 32);
-      await updateDoc(doc(db, 'users', existingUser.docId), updates);
+      if (existingUser) {
+        const updates: Record<string, unknown> = {
+          activated: false,
+          activationStatus: 'pending_approval',
+          rejectionMessage: '',
+        };
+        if (activationCode) updates.activationCode = String(activationCode).slice(0, 32);
+        await updateDoc(doc(db, 'users', existingUser.docId), updates);
+      } else {
+        const created = buildValidFallbackUserDoc(username, {
+          ...(fallbackUser || {}),
+          activated: false,
+          activationStatus: 'pending_approval',
+          rejectionMessage: '',
+          activationCode,
+        });
+        await setDoc(doc(db, 'users', created.docId), created);
+      }
       await writeActivityLog(
         username,
         'activation_pending',
@@ -883,7 +990,7 @@ const FirebaseStore = {
       return true;
     } catch (err) {
       if (err instanceof Error && err.message.includes('Missing or insufficient permissions')) {
-        handleFirestoreError(err, OperationType.UPDATE, `users/${existingUser.docId}`);
+        handleFirestoreError(err, OperationType.UPDATE, `users/${targetDocId}`);
       }
       return false;
     }
@@ -1200,27 +1307,40 @@ const FirebaseStore = {
   async adminApproveUtr(utrId: string, username: string) {
     try {
       const utrRef = doc(db, 'utrs', utrId);
-      const utrSnap = await getDoc(utrRef);
+      const utrSnap = await getDocFromServer(utrRef).catch(() => getDoc(utrRef));
       const utrData = utrSnap.exists() ? (utrSnap.data() as UtrRecord) : null;
       const isUpgrade199 =
         Boolean(utrData && (Number(utrData.amount) === 199 || String(utrData.type || '').includes('199') || String(utrData.type || '').toLowerCase().includes('upgrade')));
       const approvedStatus = isUpgrade199 ? '✓ Approved & Receipt Generated' : '✓ Approved & Activated';
 
       await updateDoc(utrRef, { status: approvedStatus });
-      const userObj = await findUserByIdentifier(username);
-      if (userObj) {
-        await updateDoc(doc(db, 'users', userObj.docId), {
+      const resolvedUsername = String(username || utrData?.username || '').trim();
+      const matchingUsers = await findAllUserDocsByUsername(resolvedUsername);
+      if (matchingUsers.length > 0) {
+        await Promise.all(
+          matchingUsers.map((u) =>
+            updateDoc(doc(db, 'users', u.docId), {
+              activated: true,
+              activationStatus: 'approved',
+              rejectionMessage: '',
+            })
+          )
+        );
+      } else if (resolvedUsername.length >= 3) {
+        const created = buildValidFallbackUserDoc(resolvedUsername, {
+          mobile: utrData?.contact || '',
           activated: true,
           activationStatus: 'approved',
           rejectionMessage: '',
         });
+        await setDoc(doc(db, 'users', created.docId), created);
       }
       await writeActivityLog(
-        username,
+        resolvedUsername,
         'activation',
         isUpgrade199
-          ? `Admin verified ₹199 UTR (${utrData?.utr || utrId}) and generated Payment Receipt for @${username}`
-          : `Admin approved UTR (${utrData?.utr || utrId}) and started panel transactions for @${username}`,
+          ? `Admin verified ₹199 UTR (${utrData?.utr || utrId}) and generated Payment Receipt for @${resolvedUsername}`
+          : `Admin approved ₹599 UTR (${utrData?.utr || utrId}) and started panel transactions for @${resolvedUsername}`,
         'activation',
         'success'
       );
@@ -1236,16 +1356,24 @@ const FirebaseStore = {
   async adminRejectUtr(utrId: string, username: string) {
     try {
       const rejectMsg = 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.';
-      await updateDoc(doc(db, 'utrs', utrId), { status: '❌ Rejected (Invalid UTR)' });
-      const userObj = await findUserByIdentifier(username);
-      if (userObj) {
-        await updateDoc(doc(db, 'users', userObj.docId), {
-          activated: false,
-          activationStatus: 'rejected',
-          rejectionMessage: rejectMsg,
-        });
+      const utrRef = doc(db, 'utrs', utrId);
+      const utrSnap = await getDocFromServer(utrRef).catch(() => getDoc(utrRef));
+      const utrData = utrSnap.exists() ? (utrSnap.data() as UtrRecord) : null;
+      await updateDoc(utrRef, { status: '❌ Rejected (Invalid UTR)' });
+      const resolvedUsername = String(username || utrData?.username || '').trim();
+      const matchingUsers = await findAllUserDocsByUsername(resolvedUsername);
+      if (matchingUsers.length > 0) {
+        await Promise.all(
+          matchingUsers.map((u) =>
+            updateDoc(doc(db, 'users', u.docId), {
+              activated: false,
+              activationStatus: 'rejected',
+              rejectionMessage: rejectMsg,
+            })
+          )
+        );
       }
-      await writeActivityLog(username, 'withdrawal', `Admin rejected payment UTR (${utrId}) for @${username}. User prompted to pay charges.`, 'security', 'warning');
+      await writeActivityLog(resolvedUsername, 'withdrawal', `Admin rejected payment UTR (${utrId}) for @${resolvedUsername}. User prompted to pay charges.`, 'security', 'warning');
       return true;
     } catch (err) {
       if (err instanceof Error && err.message.includes('Missing or insufficient permissions')) {
@@ -1256,39 +1384,47 @@ const FirebaseStore = {
   },
 
   async adminApproveUserPanel(username: string) {
-    const userObj = await findUserByIdentifier(username);
-    if (!userObj) return null;
+    const matchingUsers = await findAllUserDocsByUsername(username);
+    if (matchingUsers.length === 0) return null;
     try {
-      await updateDoc(doc(db, 'users', userObj.docId), {
-        activated: true,
-        activationStatus: 'approved',
-        rejectionMessage: '',
-      });
+      await Promise.all(
+        matchingUsers.map((u) =>
+          updateDoc(doc(db, 'users', u.docId), {
+            activated: true,
+            activationStatus: 'approved',
+            rejectionMessage: '',
+          })
+        )
+      );
       await writeActivityLog(username, 'activation', `Admin approved & started panel transactions for @${username}`, 'activation', 'success');
-      return { ...userObj, activated: true, activationStatus: 'approved' as const, rejectionMessage: '' };
+      return { ...matchingUsers[0], activated: true, activationStatus: 'approved' as const, rejectionMessage: '' };
     } catch (err) {
       if (err instanceof Error && err.message.includes('Missing or insufficient permissions')) {
-        handleFirestoreError(err, OperationType.UPDATE, `users/${userObj.docId}`);
+        handleFirestoreError(err, OperationType.UPDATE, `users/${matchingUsers[0].docId}`);
       }
       return null;
     }
   },
 
   async adminRejectUserPayment(username: string) {
-    const userObj = await findUserByIdentifier(username);
-    if (!userObj) return null;
+    const matchingUsers = await findAllUserDocsByUsername(username);
+    if (matchingUsers.length === 0) return null;
     const rejectMsg = 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.';
     try {
-      await updateDoc(doc(db, 'users', userObj.docId), {
-        activated: false,
-        activationStatus: 'rejected',
-        rejectionMessage: rejectMsg,
-      });
+      await Promise.all(
+        matchingUsers.map((u) =>
+          updateDoc(doc(db, 'users', u.docId), {
+            activated: false,
+            activationStatus: 'rejected',
+            rejectionMessage: rejectMsg,
+          })
+        )
+      );
       await writeActivityLog(username, 'withdrawal', `Admin rejected payment for @${username}. User prompted to pay charges and run.`, 'security', 'warning');
-      return { ...userObj, activated: false, activationStatus: 'rejected' as const, rejectionMessage: rejectMsg };
+      return { ...matchingUsers[0], activated: false, activationStatus: 'rejected' as const, rejectionMessage: rejectMsg };
     } catch (err) {
       if (err instanceof Error && err.message.includes('Missing or insufficient permissions')) {
-        handleFirestoreError(err, OperationType.UPDATE, `users/${userObj.docId}`);
+        handleFirestoreError(err, OperationType.UPDATE, `users/${matchingUsers[0].docId}`);
       }
       return null;
     }

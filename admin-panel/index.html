@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Mahadev Admin — Users, Logins, UTRs &amp; Payouts</title>
-    <meta name="description" content="Standalone Mahadev Pannel Admin Control Center for date-wise Users, Logins, ₹999 &amp; ₹199 UTR approvals, rejections, and payout details.">
+    <meta name="description" content="Standalone Mahadev Pannel Admin Control Center for date-wise Users, Logins, ₹599 &amp; ₹199 UTR approvals, rejections, and payout details.">
     <meta property="og:title" content="Mahadev Admin — Control Center">
     <meta property="og:description" content="Standalone real-time Firestore Admin Portal for Mahadev Pannel.">
     <link rel="stylesheet" href="./admin-style.css">
@@ -106,10 +106,10 @@
 
         <!-- DATE-WISE UTR & ACTIVITY KPI STRIP -->
         <section class="adm-metrics-grid" aria-label="Date-wise UTR Summary">
-            <button type="button" class="adm-metric-card adm-mc-emerald" data-kpi-jump="999:approved">
-                <span class="adm-mc-label">₹999 UTR Accepted</span>
-                <strong class="adm-mc-val tabular-nums" id="metric999Accepted">0</strong>
-                <span class="adm-mc-sub tabular-nums" id="metric999AcceptedSub">0 pending · 0 total</span>
+            <button type="button" class="adm-metric-card adm-mc-emerald" data-kpi-jump="599:approved">
+                <span class="adm-mc-label">₹599 UTR Accepted</span>
+                <strong class="adm-mc-val tabular-nums" id="metric599Accepted">0</strong>
+                <span class="adm-mc-sub tabular-nums" id="metric599AcceptedSub">0 pending · 0 total</span>
             </button>
 
             <button type="button" class="adm-metric-card adm-mc-sky" data-kpi-jump="199:approved">
@@ -118,10 +118,10 @@
                 <span class="adm-mc-sub tabular-nums" id="metric199AcceptedSub">0 pending · 0 shown</span>
             </button>
 
-            <button type="button" class="adm-metric-card adm-mc-amber" data-kpi-jump="999:rejected">
-                <span class="adm-mc-label">₹999 UTR Rejected</span>
-                <strong class="adm-mc-val tabular-nums" id="metric999Rejected">0</strong>
-                <span class="adm-mc-sub tabular-nums" id="metric999RejectedSub">Selected date</span>
+            <button type="button" class="adm-metric-card adm-mc-amber" data-kpi-jump="599:rejected">
+                <span class="adm-mc-label">₹599 UTR Rejected</span>
+                <strong class="adm-mc-val tabular-nums" id="metric599Rejected">0</strong>
+                <span class="adm-mc-sub tabular-nums" id="metric599RejectedSub">Selected date</span>
             </button>
 
             <button type="button" class="adm-metric-card adm-mc-rose" data-kpi-jump="199:all">
@@ -180,12 +180,12 @@
                 <div class="adm-panel-head">
                     <div>
                         <h2 class="adm-panel-title" id="utrsPanelTitle">UTRs &amp; Payout Details</h2>
-                        <p class="adm-panel-desc" id="utrsPanelDesc">Approve or reject ₹999 deposits and ₹199 payout UTR requests for the selected date.</p>
+                        <p class="adm-panel-desc" id="utrsPanelDesc">Approve or reject ₹599 deposits and ₹199 payout UTR requests for the selected date.</p>
                     </div>
                     <div class="adm-filter-bars">
                         <div class="adm-segmented" id="utrTypeFilterBar" role="group" aria-label="Filter by UTR type">
                             <button type="button" class="adm-seg-btn active" data-utr-type="all">All UTRs</button>
-                            <button type="button" class="adm-seg-btn" data-utr-type="999">₹999</button>
+                            <button type="button" class="adm-seg-btn" data-utr-type="599">₹599</button>
                             <button type="button" class="adm-seg-btn" data-utr-type="199">₹199</button>
                         </div>
                         <div class="adm-segmented" id="utrStatusFilterBar" role="group" aria-label="Filter by UTR status">

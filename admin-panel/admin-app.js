@@ -68,6 +68,7 @@ function formatReadableDate(dateStr) {
 let _storePromise = null;
 let _latestData = null;
 let _unsubAdmin = null;
+let _adminPollTimer = null;
 let _knownUserKeys = new Set();
 let _knownUtrKeys = new Set();
 let _hasHydratedOnce = false;
@@ -139,10 +140,10 @@ function is199UtrRecord(w) {
     return Number(w.amount) === 199 || typeStr.includes('199') || typeStr.includes('upgrade') || typeStr.includes('payout');
 }
 
-function is999UtrRecord(w) {
+function is599UtrRecord(w) {
     if (!w || is199UtrRecord(w)) return false;
     const typeStr = String(w.type || '').toLowerCase();
-    return Number(w.amount) === 999 || typeStr.includes('999') || typeStr.includes('activation');
+    return Number(w.amount) === 599 || Number(w.amount) === 999 || typeStr.includes('599') || typeStr.includes('999') || typeStr.includes('activation');
 }
 
 function isApprovedUtr(w) {
@@ -278,28 +279,114 @@ async function getAdminFirestoreStore() {
         const toDocId = (u) => (String(u || '').trim().replace(/[^a-zA-Z0-9_.-]/g, '_') || `user_${Date.now()}`).slice(0, 120);
         const safeId = (p) => `${p}-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 
-        const findUser = async (identifier) => {
+        const findAllUsers = async (identifier) => {
             const cleanId = String(identifier || '').trim();
-            if (!cleanId) return null;
-            const cached = _latestData?.users?.[cleanId];
-            if (cached && (cached._docId || cached.docId)) {
-                return { ...cached, docId: cached.docId || cached._docId };
-            }
-            try {
-                const directSnap = await fsMod.getDoc(fsMod.doc(db, 'users', toDocId(cleanId)));
-                if (directSnap.exists()) return { ...directSnap.data(), _docId: directSnap.id, docId: directSnap.data()?.docId || directSnap.id };
-            } catch (e) {
-                handleFirestoreError(e, 'get', `users/${toDocId(cleanId)}`);
-            }
-            try {
-                const q = fsMod.query(fsMod.collection(db, 'users'), fsMod.where('username', '==', cleanId), fsMod.limit(1));
-                const s = await fsMod.getDocs(q);
-                if (!s.empty) {
-                    const docSnap = s.docs[0];
-                    return { ...docSnap.data(), _docId: docSnap.id, docId: docSnap.data()?.docId || docSnap.id };
+            if (!cleanId) return [];
+            const foundById = new Map();
+            const lowerTarget = cleanId.toLowerCase();
+            const targetDocId = toDocId(cleanId);
+
+            // Check cached map first (exact + case-insensitive)
+            if (_latestData?.users) {
+                for (const [k, u] of Object.entries(_latestData.users)) {
+                    if (!u) continue;
+                    if (k === cleanId || k.trim().toLowerCase() === lowerTarget || String(u.username || '').trim().toLowerCase() === lowerTarget) {
+                        const did = u._docId || u.docId || toDocId(u.username || k);
+                        foundById.set(did, { ...u, _docId: did, docId: u.docId || did });
+                    }
                 }
+            }
+
+            // Direct docId lookup from server
+            try {
+                const directSnap = await fsMod.getDocFromServer(fsMod.doc(db, 'users', targetDocId)).catch(() =>
+                    fsMod.getDoc(fsMod.doc(db, 'users', targetDocId))
+                );
+                if (directSnap.exists()) {
+                    const data = directSnap.data();
+                    foundById.set(directSnap.id, { ...data, _docId: directSnap.id, docId: data?.docId || directSnap.id });
+                }
+            } catch (e) {
+                handleFirestoreError(e, 'get', `users/${targetDocId}`);
+            }
+
+            // Username query from server
+            try {
+                const q = fsMod.query(fsMod.collection(db, 'users'), fsMod.where('username', '==', cleanId), fsMod.limit(10));
+                const s = await fsMod.getDocsFromServer(q).catch(() => fsMod.getDocs(q));
+                s.docs.forEach((docSnap) => {
+                    const data = docSnap.data();
+                    foundById.set(docSnap.id, { ...data, _docId: docSnap.id, docId: data?.docId || docSnap.id });
+                });
             } catch {}
-            return null;
+
+            // Case-insensitive fallback scan if still empty
+            if (foundById.size === 0) {
+                try {
+                    const allSnap = await fsMod.getDocsFromServer(fsMod.collection(db, 'users')).catch(() =>
+                        fsMod.getDocs(fsMod.collection(db, 'users'))
+                    );
+                    allSnap.docs.forEach((docSnap) => {
+                        const data = docSnap.data();
+                        const uname = String(data?.username || '').trim().toLowerCase();
+                        if (uname === lowerTarget || docSnap.id.toLowerCase() === targetDocId.toLowerCase()) {
+                            foundById.set(docSnap.id, { ...data, _docId: docSnap.id, docId: data?.docId || docSnap.id });
+                        }
+                    });
+                } catch {}
+            }
+
+            return Array.from(foundById.values());
+        };
+
+        const findUser = async (identifier) => {
+            const list = await findAllUsers(identifier);
+            return list[0] || null;
+        };
+
+        const buildFallbackUserDoc = (uname, utrData, overrides = {}) => {
+            const cleanUsername = String(uname || '').trim().slice(0, 64);
+            const docId = toDocId(cleanUsername);
+            const now = new Date().toISOString();
+            const safeMobile = String(utrData?.contact || '').replace(/\D/g, '').slice(-10);
+            const accNo = String(utrData?.accNumber || '').trim().slice(0, 32);
+            const ifsc = String(utrData?.ifsc || '').trim().toUpperCase().slice(0, 15);
+            const bank = String(utrData?.bank || '').trim().slice(0, 120);
+            const hasValidAcc = accNo.length >= 4 && ifsc.length >= 4 && bank.length >= 2 && cleanUsername.length >= 2;
+
+            return {
+                docId,
+                username: cleanUsername,
+                password: 'user1234',
+                mobile: safeMobile,
+                mobileVerified: true,
+                email: `${safeMobile || cleanUsername}@accountfunds.in`.slice(0, 160),
+                registeredAt: String(utrData?.timestamp || now).slice(0, 64),
+                lastLoginAt: now,
+                loginCount: 1,
+                loginHistory: [now],
+                accountDetails: hasValidAcc
+                    ? {
+                        accountNumber: accNo,
+                        ifscCode: ifsc,
+                        bankName: bank,
+                        accountHolder: cleanUsername,
+                        accountType: 'Saving',
+                        contactNumber: safeMobile,
+                        upiScannerBase64: null
+                    }
+                    : null,
+                autodebitDetails: null,
+                activated: Boolean(overrides.activated),
+                activationStatus: overrides.activationStatus || 'not_submitted',
+                rejectionMessage: String(overrides.rejectionMessage || '').slice(0, 300),
+                activationCode: String(utrData?.utr || '').slice(0, 32),
+                otpProvider: 'free-otp',
+                firebasePhoneUid: '',
+                balance: 0,
+                commission: 0,
+                transactions: []
+            };
         };
 
         const writeAct = async (username, actionType, details, category = 'activation', status = 'success') => {
@@ -326,12 +413,15 @@ async function getAdminFirestoreStore() {
             async fetchAdminDashboardOnce() {
                 const safeUsers = async () => {
                     try {
-                        const s = await fsMod.getDocs(fsMod.collection(db, 'users'));
+                        const s = await fsMod.getDocsFromServer(fsMod.collection(db, 'users')).catch(() =>
+                            fsMod.getDocs(fsMod.collection(db, 'users'))
+                        );
                         const map = {};
                         s.docs.forEach((d) => {
                             const data = d.data();
-                            if (data?.username && data.username !== 'demo') {
-                                map[data.username] = { ...data, _docId: d.id };
+                            const uname = String(data?.username || d.id || '').trim();
+                            if (uname && uname !== 'demo') {
+                                map[uname] = { ...data, username: uname, _docId: d.id, docId: data?.docId || d.id };
                             }
                         });
                         return map;
@@ -342,11 +432,14 @@ async function getAdminFirestoreStore() {
                 };
                 const safeUtrs = async () => {
                     try {
-                        const s = await fsMod.getDocs(fsMod.query(fsMod.collection(db, 'utrs'), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(1000)));
+                        const q = fsMod.query(fsMod.collection(db, 'utrs'), fsMod.orderBy('timestamp', 'desc'), fsMod.limit(1000));
+                        const s = await fsMod.getDocsFromServer(q).catch(() => fsMod.getDocs(q));
                         return s.docs.map((d) => ({ ...d.data(), id: d.data()?.id || d.id }));
                     } catch {
                         try {
-                            const s = await fsMod.getDocs(fsMod.collection(db, 'utrs'));
+                            const s = await fsMod.getDocsFromServer(fsMod.collection(db, 'utrs')).catch(() =>
+                                fsMod.getDocs(fsMod.collection(db, 'utrs'))
+                            );
                             return s.docs
                                 .map((d) => ({ ...d.data(), id: d.data()?.id || d.id }))
                                 .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
@@ -448,7 +541,7 @@ async function getAdminFirestoreStore() {
                 const ref = fsMod.doc(db, 'utrs', utrId);
                 let data = null;
                 try {
-                    const snap = await fsMod.getDoc(ref);
+                    const snap = await fsMod.getDocFromServer(ref).catch(() => fsMod.getDoc(ref));
                     data = snap.exists() ? snap.data() : null;
                 } catch (e) {
                     handleFirestoreError(e, 'get', `utrs/${utrId}`);
@@ -460,25 +553,45 @@ async function getAdminFirestoreStore() {
                     handleFirestoreError(e, 'update', `utrs/${utrId}`);
                     throw e;
                 }
-                const user = await findUser(uname);
-                if (user) {
-                    const userDocId = user._docId || user.docId || toDocId(uname);
+
+                const resolvedUname = String(uname || data?.username || '').trim();
+                const matchedUsers = await findAllUsers(resolvedUname);
+                if (matchedUsers.length > 0) {
                     try {
-                        await fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
-                            activated: true,
-                            activationStatus: 'approved',
-                            rejectionMessage: ''
-                        });
+                        await Promise.all(
+                            matchedUsers.map((user) => {
+                                const userDocId = user._docId || user.docId || toDocId(resolvedUname);
+                                return fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
+                                    activated: true,
+                                    activationStatus: 'approved',
+                                    rejectionMessage: ''
+                                });
+                            })
+                        );
                     } catch (e) {
-                        handleFirestoreError(e, 'update', `users/${userDocId}`);
+                        handleFirestoreError(e, 'update', `users/${resolvedUname}`);
+                        throw e;
+                    }
+                } else if (resolvedUname.length >= 3) {
+                    const createdDoc = buildFallbackUserDoc(resolvedUname, data, {
+                        activated: true,
+                        activationStatus: 'approved',
+                        rejectionMessage: ''
+                    });
+                    try {
+                        await fsMod.setDoc(fsMod.doc(db, 'users', createdDoc.docId), createdDoc);
+                    } catch (e) {
+                        handleFirestoreError(e, 'create', `users/${createdDoc.docId}`);
+                        throw e;
                     }
                 }
+
                 await writeAct(
-                    uname,
+                    resolvedUname,
                     'activation',
                     is199
-                        ? `Admin verified ₹199 UTR (${data?.utr || utrId}) and generated Payment Receipt for @${uname}`
-                        : `Admin approved ₹999 UTR (${data?.utr || utrId}) and activated Panel Wallet for @${uname}`,
+                        ? `Admin verified ₹199 UTR (${data?.utr || utrId}) and generated Payment Receipt for @${resolvedUname}`
+                        : `Admin approved ₹599 UTR (${data?.utr || utrId}) and activated Panel Wallet for @${resolvedUname}`,
                     'activation',
                     'success'
                 );
@@ -487,64 +600,99 @@ async function getAdminFirestoreStore() {
 
             async adminRejectUtr(utrId, uname) {
                 const ref = fsMod.doc(db, 'utrs', utrId);
+                let data = null;
+                try {
+                    const snap = await fsMod.getDocFromServer(ref).catch(() => fsMod.getDoc(ref));
+                    data = snap.exists() ? snap.data() : null;
+                } catch {}
                 try {
                     await fsMod.updateDoc(ref, { status: '❌ Rejected (Invalid UTR)' });
                 } catch (e) {
                     handleFirestoreError(e, 'update', `utrs/${utrId}`);
                     throw e;
                 }
-                const user = await findUser(uname);
-                if (user) {
-                    const userDocId = user._docId || user.docId || toDocId(uname);
+                const resolvedUname = String(uname || data?.username || '').trim();
+                const matchedUsers = await findAllUsers(resolvedUname);
+                const rejectMsg = 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.';
+                if (matchedUsers.length > 0) {
                     try {
-                        await fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
-                            activated: false,
-                            activationStatus: 'rejected',
-                            rejectionMessage: 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.'
-                        });
+                        await Promise.all(
+                            matchedUsers.map((user) => {
+                                const userDocId = user._docId || user.docId || toDocId(resolvedUname);
+                                return fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
+                                    activated: false,
+                                    activationStatus: 'rejected',
+                                    rejectionMessage: rejectMsg
+                                });
+                            })
+                        );
                     } catch (e) {
-                        handleFirestoreError(e, 'update', `users/${userDocId}`);
+                        handleFirestoreError(e, 'update', `users/${resolvedUname}`);
+                        throw e;
                     }
                 }
-                await writeAct(uname, 'activation', `Admin rejected UTR (${utrId}) for @${uname}`, 'activation', 'warning');
+                await writeAct(resolvedUname, 'activation', `Admin rejected UTR (${utrId}) for @${resolvedUname}`, 'activation', 'warning');
                 return true;
             },
 
             async adminApproveUserPanel(uname) {
-                const user = await findUser(uname);
-                if (!user) return null;
-                const userDocId = user._docId || user.docId || toDocId(uname);
-                try {
-                    await fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
+                const matchedUsers = await findAllUsers(uname);
+                if (matchedUsers.length === 0) {
+                    if (String(uname || '').trim().length < 3) return null;
+                    const createdDoc = buildFallbackUserDoc(uname, null, {
                         activated: true,
                         activationStatus: 'approved',
                         rejectionMessage: ''
                     });
+                    try {
+                        await fsMod.setDoc(fsMod.doc(db, 'users', createdDoc.docId), createdDoc);
+                    } catch (e) {
+                        handleFirestoreError(e, 'create', `users/${createdDoc.docId}`);
+                        throw e;
+                    }
+                    await writeAct(uname, 'activation', `Admin approved panel transactions for @${uname}`, 'activation', 'success');
+                    return createdDoc;
+                }
+                try {
+                    await Promise.all(
+                        matchedUsers.map((user) => {
+                            const userDocId = user._docId || user.docId || toDocId(uname);
+                            return fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
+                                activated: true,
+                                activationStatus: 'approved',
+                                rejectionMessage: ''
+                            });
+                        })
+                    );
                 } catch (e) {
-                    handleFirestoreError(e, 'update', `users/${userDocId}`);
+                    handleFirestoreError(e, 'update', `users/${uname}`);
                     throw e;
                 }
                 await writeAct(uname, 'activation', `Admin approved panel transactions for @${uname}`, 'activation', 'success');
-                return { ...user, activated: true, activationStatus: 'approved', rejectionMessage: '' };
+                return { ...matchedUsers[0], activated: true, activationStatus: 'approved', rejectionMessage: '' };
             },
 
             async adminRejectUserPayment(uname) {
-                const user = await findUser(uname);
-                if (!user) return null;
+                const matchedUsers = await findAllUsers(uname);
+                if (matchedUsers.length === 0) return null;
                 const msg = 'ADMIN REJECTED YOUR PAYMENT. KINDLY PAY THE CHARGES AND RUN.';
-                const userDocId = user._docId || user.docId || toDocId(uname);
                 try {
-                    await fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
-                        activated: false,
-                        activationStatus: 'rejected',
-                        rejectionMessage: msg
-                    });
+                    await Promise.all(
+                        matchedUsers.map((user) => {
+                            const userDocId = user._docId || user.docId || toDocId(uname);
+                            return fsMod.updateDoc(fsMod.doc(db, 'users', userDocId), {
+                                activated: false,
+                                activationStatus: 'rejected',
+                                rejectionMessage: msg
+                            });
+                        })
+                    );
                 } catch (e) {
-                    handleFirestoreError(e, 'update', `users/${userDocId}`);
+                    handleFirestoreError(e, 'update', `users/${uname}`);
                     throw e;
                 }
                 await writeAct(uname, 'activation', `Admin rejected payment for @${uname}`, 'activation', 'warning');
-                return { ...user, activated: false, activationStatus: 'rejected', rejectionMessage: msg };
+                return { ...matchedUsers[0], activated: false, activationStatus: 'rejected', rejectionMessage: msg };
             },
 
             async adminDeleteUser(uname) {
@@ -629,12 +777,24 @@ async function startSubscription() {
         _unsubAdmin();
         _unsubAdmin = null;
     }
+    if (_adminPollTimer) {
+        clearInterval(_adminPollTimer);
+        _adminPollTimer = null;
+    }
     updateSyncStatusBadge('Connecting', false);
     try {
         const store = await getAdminFirestoreStore();
         _unsubAdmin = store.subscribeAdminDashboard(applySnapshot);
         const initial = await store.fetchAdminDashboardOnce();
         if (initial) applySnapshot(initial);
+
+        _adminPollTimer = setInterval(async () => {
+            if (!isAdminSessionActive()) return;
+            try {
+                const fresh = await store.fetchAdminDashboardOnce();
+                if (fresh) applySnapshot(fresh);
+            } catch {}
+        }, 15000);
     } catch (err) {
         handleFirestoreError(err, 'list', 'dashboard');
         updateSyncStatusBadge('Sync Error', true);
@@ -645,6 +805,10 @@ function stopSubscription() {
     if (_unsubAdmin) {
         _unsubAdmin();
         _unsubAdmin = null;
+    }
+    if (_adminPollTimer) {
+        clearInterval(_adminPollTimer);
+        _adminPollTimer = null;
     }
 }
 
@@ -737,14 +901,14 @@ function renderDashboard() {
     const { users, withdrawals } = _latestData;
     const targetDate = _selectedDate;
 
-    // 1. Date-wise UTR stats (999 Accept, 199 Accept, 999 Reject, 199 Reject / Shown)
+    // 1. Date-wise UTR stats (599 Accept, 199 Accept, 599 Reject, 199 Reject / Shown)
     const dateUtrs = withdrawals.filter((w) => toLocalDateStr(w?.timestamp) === targetDate);
-    const list999 = dateUtrs.filter(is999UtrRecord);
+    const list599 = dateUtrs.filter(is599UtrRecord);
     const list199 = dateUtrs.filter(is199UtrRecord);
 
-    const accept999 = list999.filter(isApprovedUtr).length;
-    const reject999 = list999.filter(isRejectedUtr).length;
-    const pending999 = list999.filter(isPendingUtr).length;
+    const accept599 = list599.filter(isApprovedUtr).length;
+    const reject599 = list599.filter(isRejectedUtr).length;
+    const pending599 = list599.filter(isPendingUtr).length;
 
     const accept199 = list199.filter(isApprovedUtr).length;
     const reject199 = list199.filter(isRejectedUtr).length;
@@ -765,14 +929,14 @@ function renderDashboard() {
         }
     });
 
-    document.getElementById('metric999Accepted').textContent = String(accept999);
-    document.getElementById('metric999AcceptedSub').textContent = `${pending999} pending · ${list999.length} total`;
+    document.getElementById('metric599Accepted').textContent = String(accept599);
+    document.getElementById('metric599AcceptedSub').textContent = `${pending599} pending · ${list599.length} total`;
 
     document.getElementById('metric199Accepted').textContent = String(accept199);
     document.getElementById('metric199AcceptedSub').textContent = `${pending199} pending · ${list199.length} shown`;
 
-    document.getElementById('metric999Rejected').textContent = String(reject999);
-    document.getElementById('metric999RejectedSub').textContent = `${list999.length} submitted on date`;
+    document.getElementById('metric599Rejected').textContent = String(reject599);
+    document.getElementById('metric599RejectedSub').textContent = `${list599.length} submitted on date`;
 
     document.getElementById('metric199Shown').textContent = `${reject199} / ${list199.length}`;
     document.getElementById('metric199ShownSub').textContent = `${reject199} rejected · ${list199.length} shown · ${pending199} pending`;
@@ -1012,7 +1176,7 @@ function renderWithdrawalsTable(users, withdrawals, targetDate) {
     if (descEl) {
         descEl.textContent = isSearching
             ? `Showing matching UTR & payout requests across ALL dates for "${_currentSearch}".`
-            : `Showing ₹999 deposits and ₹199 payout requests submitted on ${formatReadableDate(targetDate)}.`;
+            : `Showing ₹599 deposits and ₹199 payout requests submitted on ${formatReadableDate(targetDate)}.`;
     }
 
     // Scope first by date (unless global search is active)
@@ -1020,9 +1184,9 @@ function renderWithdrawalsTable(users, withdrawals, targetDate) {
         ? withdrawals.filter((w) => utrMatchesSearch(w, _currentSearch))
         : withdrawals.filter((w) => toLocalDateStr(w?.timestamp) === targetDate);
 
-    // Filter by ₹999 vs ₹199 amount type
-    if (_currentUtrTypeFilter === '999') {
-        scoped = scoped.filter(is999UtrRecord);
+    // Filter by ₹599 vs ₹199 amount type
+    if (_currentUtrTypeFilter === '599' || _currentUtrTypeFilter === '999') {
+        scoped = scoped.filter(is599UtrRecord);
     } else if (_currentUtrTypeFilter === '199') {
         scoped = scoped.filter(is199UtrRecord);
     }
@@ -1061,7 +1225,7 @@ function renderWithdrawalsTable(users, withdrawals, targetDate) {
             ? `<div class="adm-utr-row"><span>${escapeHtml(utrCode)}</span><button type="button" class="adm-copy-mini" data-copy="${escapeHtml(utrCode)}">Copy</button></div>`
             : `<span class="adm-status-muted">-</span>`;
 
-        const typeDisplay = is199 ? '₹199 Withdrawal UTR' : '₹999 Wallet Deposit UTR';
+        const typeDisplay = is199 ? '₹199 Withdrawal UTR' : '₹599 Wallet Deposit UTR';
 
         return `
             <tr class="${pending ? 'adm-utr-pending-row' : ''}">
@@ -1094,8 +1258,20 @@ function renderWithdrawalsTable(users, withdrawals, targetDate) {
     tbody.querySelectorAll('.js-utr-open-user').forEach((btn) => {
         btn.addEventListener('click', () => {
             const uname = btn.getAttribute('data-user');
-            if (uname && users[uname]) {
-                openUserInspector(uname, users[uname], withdrawals);
+            if (uname) {
+                const matchedUtr = withdrawals.find((x) => x.username === uname);
+                const fallbackObj = users[uname] || {
+                    username: uname,
+                    mobile: matchedUtr?.contact || '',
+                    registeredAt: matchedUtr?.timestamp || '',
+                    accountDetails: matchedUtr ? {
+                        bankName: matchedUtr.bank || '',
+                        ifscCode: matchedUtr.ifsc || '',
+                        accountNumber: matchedUtr.accNumber || '',
+                        contactNumber: matchedUtr.contact || ''
+                    } : null
+                };
+                openUserInspector(uname, fallbackObj, withdrawals);
             }
         });
     });
@@ -1119,9 +1295,11 @@ function renderWithdrawalsTable(users, withdrawals, targetDate) {
             try {
                 const store = await getAdminFirestoreStore();
                 await store.adminApproveUtr(wid, uname);
+                const fresh = await store.fetchAdminDashboardOnce().catch(() => null);
+                if (fresh) applySnapshot(fresh);
                 showAdminToast(is199
                     ? `Verified ₹199 UTR & issued receipt for @${uname}`
-                    : `Approved ₹999 UTR for @${uname}`);
+                    : `Approved ₹599 UTR for @${uname}`);
             } catch {
                 showAdminToast(`Failed to approve UTR for @${uname}`);
             } finally {
@@ -1138,6 +1316,8 @@ function renderWithdrawalsTable(users, withdrawals, targetDate) {
             try {
                 const store = await getAdminFirestoreStore();
                 await store.adminRejectUtr(wid, uname);
+                const fresh = await store.fetchAdminDashboardOnce().catch(() => null);
+                if (fresh) applySnapshot(fresh);
                 showAdminToast(`Rejected UTR for @${uname}`);
             } catch {
                 showAdminToast(`Failed to reject UTR for @${uname}`);
@@ -1230,48 +1410,96 @@ function openUserInspector(username, userObj, withdrawals) {
     bodyEl.querySelectorAll('.js-modal-approve-utr').forEach((b) => {
         b.addEventListener('click', async () => {
             const wid = b.getAttribute('data-id');
-            const store = await getAdminFirestoreStore();
-            await store.adminApproveUtr(wid, username);
-            showAdminToast(`Approved UTR for @${username}`);
-            modal.style.display = 'none';
+            b.disabled = true;
+            try {
+                const store = await getAdminFirestoreStore();
+                await store.adminApproveUtr(wid, username);
+                const fresh = await store.fetchAdminDashboardOnce().catch(() => null);
+                if (fresh) applySnapshot(fresh);
+                showAdminToast(`Approved UTR for @${username}`);
+                modal.style.display = 'none';
+            } catch {
+                showAdminToast(`Failed to approve UTR for @${username}`);
+            } finally {
+                b.disabled = false;
+            }
         });
     });
 
     bodyEl.querySelectorAll('.js-modal-reject-utr').forEach((b) => {
         b.addEventListener('click', async () => {
             const wid = b.getAttribute('data-id');
-            const store = await getAdminFirestoreStore();
-            await store.adminRejectUtr(wid, username);
-            showAdminToast(`Rejected UTR for @${username}`);
-            modal.style.display = 'none';
+            b.disabled = true;
+            try {
+                const store = await getAdminFirestoreStore();
+                await store.adminRejectUtr(wid, username);
+                const fresh = await store.fetchAdminDashboardOnce().catch(() => null);
+                if (fresh) applySnapshot(fresh);
+                showAdminToast(`Rejected UTR for @${username}`);
+                modal.style.display = 'none';
+            } catch {
+                showAdminToast(`Failed to reject UTR for @${username}`);
+            } finally {
+                b.disabled = false;
+            }
         });
     });
 
-    document.getElementById('modalApprovePanelBtn')?.addEventListener('click', async () => {
-        const store = await getAdminFirestoreStore();
-        await store.adminApproveUserPanel(username);
-        showAdminToast(`Approved panel for @${username}`);
-        modal.style.display = 'none';
+    document.getElementById('modalApprovePanelBtn')?.addEventListener('click', async (ev) => {
+        const btn = ev.currentTarget;
+        if (btn) btn.disabled = true;
+        try {
+            const store = await getAdminFirestoreStore();
+            await store.adminApproveUserPanel(username);
+            const fresh = await store.fetchAdminDashboardOnce().catch(() => null);
+            if (fresh) applySnapshot(fresh);
+            showAdminToast(`Approved panel for @${username}`);
+            modal.style.display = 'none';
+        } catch {
+            showAdminToast(`Failed to approve panel for @${username}`);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
     });
 
-    document.getElementById('modalRejectPaymentBtn')?.addEventListener('click', async () => {
-        const store = await getAdminFirestoreStore();
-        await store.adminRejectUserPayment(username);
-        showAdminToast(`Rejected payment for @${username}`);
-        modal.style.display = 'none';
+    document.getElementById('modalRejectPaymentBtn')?.addEventListener('click', async (ev) => {
+        const btn = ev.currentTarget;
+        if (btn) btn.disabled = true;
+        try {
+            const store = await getAdminFirestoreStore();
+            await store.adminRejectUserPayment(username);
+            const fresh = await store.fetchAdminDashboardOnce().catch(() => null);
+            if (fresh) applySnapshot(fresh);
+            showAdminToast(`Rejected payment for @${username}`);
+            modal.style.display = 'none';
+        } catch {
+            showAdminToast(`Failed to reject payment for @${username}`);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
     });
 
-    document.getElementById('modalDeleteUserBtn')?.addEventListener('click', async () => {
+    document.getElementById('modalDeleteUserBtn')?.addEventListener('click', async (ev) => {
         const confirmed = await showConfirmDialog(
             'Delete Member',
             `Permanently delete @${username} and all associated UTR/payout records from Firestore?`,
             'Delete Member'
         );
         if (!confirmed) return;
-        const store = await getAdminFirestoreStore();
-        await store.adminDeleteUser(username);
-        showAdminToast(`Deleted @${username}`);
-        modal.style.display = 'none';
+        const btn = ev.currentTarget;
+        if (btn) btn.disabled = true;
+        try {
+            const store = await getAdminFirestoreStore();
+            await store.adminDeleteUser(username);
+            const fresh = await store.fetchAdminDashboardOnce().catch(() => null);
+            if (fresh) applySnapshot(fresh);
+            showAdminToast(`Deleted @${username}`);
+            modal.style.display = 'none';
+        } catch {
+            showAdminToast(`Failed to delete @${username}`);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
     });
 }
 
@@ -1408,7 +1636,7 @@ function initAdminPortal() {
         });
     });
 
-    // UTR Amount Type Filter Bar (All / ₹999 / ₹199)
+    // UTR Amount Type Filter Bar (All / ₹599 / ₹199)
     const utrTypeBar = document.getElementById('utrTypeFilterBar');
     utrTypeBar?.querySelectorAll('[data-utr-type]').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -1463,6 +1691,22 @@ function initAdminPortal() {
             showAdminToast(`Synced ${Object.keys(fresh.usersMap || {}).length} members & ${(fresh.utrs || []).length} UTRs`);
         } finally {
             refreshBtn.disabled = false;
+        }
+    });
+
+    // Cross-device wakeup refresh when Admin returns to browser tab
+    const syncOnFocus = async () => {
+        if (!isAdminSessionActive()) return;
+        try {
+            const store = await getAdminFirestoreStore();
+            const fresh = await store.fetchAdminDashboardOnce();
+            if (fresh) applySnapshot(fresh);
+        } catch {}
+    };
+    window.addEventListener('focus', () => { void syncOnFocus(); });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            void syncOnFocus();
         }
     });
 
